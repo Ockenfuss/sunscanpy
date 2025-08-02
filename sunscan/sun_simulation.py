@@ -1,10 +1,6 @@
 """Module for simulating sun scans and fitting the simulation to real data."""
-import argparse
-import datetime as dt
-from itertools import product
 from pathlib import Path
 
-import yaml
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -13,20 +9,16 @@ from scipy.optimize import minimize
 from scipy.signal import convolve2d
 
 from sunscan import logger, sc_params
-from sunscan.utils import _phitheta_to_cartesian, _azi_elv_to_theta_phi
+from sunscan.utils import spherical_to_xyz
 from sunscan.scanner import IdentityScanner
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force, rmse
-
-# import mira_utils.sunscan.processing as sunproc
-from sunscan import SkyObject
-# from mira_utils.preprocess import open_znc
 
 PARAMETER_MAP = {
     "dgamma": 0,
     "domega": 1,
     "fwhm_x": 2,
     "fwhm_y": 3,
-    "dt": 4,
+    "dtime": 4,
     "backlash": 5,
     "limb_darkening": 6
 }
@@ -87,42 +79,69 @@ def calculate_lut(dgamma_range=None, domega_range=None, resolution=401, fwhm_x=N
 
 
 
+# def _cart_to_tangential_matrix(anchor_azi, anchor_elv):
+#     """Matrix to convert from cartesian coordinates to cartesian coordinates in the tangential plane, 
+#     anchored at the given position on the unit sphere."""
+#     anchor_phi, anchor_theta = _azi_elv_to_theta_phi(np.deg2rad(anchor_azi), np.deg2rad(anchor_elv))
+#     loc_ze = xr.concat(_phitheta_to_cartesian(anchor_phi, anchor_theta), dim='row')
+#     # y: co-elevation axis
+#     anc_theta_y = np.pi/2-anchor_theta
+#     anc_phi_y = (anchor_phi+np.pi) % (2*np.pi)
+#     loc_ye = xr.concat(_phitheta_to_cartesian(anc_phi_y, anc_theta_y), dim='row')
+#     # x: cross-elevation axis
+#     anc_phi_x = (anchor_phi-np.pi/2) % (2*np.pi)
+#     anc_theta_x = 0*anchor_theta+np.pi/2
+#     loc_xe = xr.concat(_phitheta_to_cartesian(anc_phi_x, anc_theta_x), dim='row')
+
+#     conv_loc_to_cart = xr.concat([loc_xe, loc_ye, loc_ze], dim='col')
+#     # invert
+#     conv_cart_to_loc = xr.apply_ufunc(np.linalg.inv, conv_loc_to_cart, input_core_dims=[
+#                                       ['col', 'row']], output_core_dims=[['col', 'row']])
+#     return conv_cart_to_loc
+
 def _cart_to_tangential_matrix(anchor_azi, anchor_elv):
-    """Matrix to convert from cartesian coordinates to cartesian coordinates in the tangential plane, 
+    """Matrix to convert from cartesian world coordinates to cartesian coordinates in the tangential plane, 
     anchored at the given position on the unit sphere."""
-    anchor_phi, anchor_theta = _azi_elv_to_theta_phi(np.deg2rad(anchor_azi), np.deg2rad(anchor_elv))
-    loc_ze = xr.concat(_phitheta_to_cartesian(anchor_phi, anchor_theta), dim='row')
-    # y: co-elevation axis
-    anc_theta_y = np.pi/2-anchor_theta
-    anc_phi_y = (anchor_phi+np.pi) % (2*np.pi)
-    loc_ye = xr.concat(_phitheta_to_cartesian(anc_phi_y, anc_theta_y), dim='row')
+    loc_ze = xr.concat(spherical_to_xyz(anchor_azi, anchor_elv), dim='row')
+    world_ze= xr.zeros_like(loc_ze)
+    world_ze[{'row': 2}] = 1.0
     # x: cross-elevation axis
-    anc_phi_x = (anchor_phi-np.pi/2) % (2*np.pi)
-    anc_theta_x = 0*anchor_theta+np.pi/2
-    loc_xe = xr.concat(_phitheta_to_cartesian(anc_phi_x, anc_theta_x), dim='row')
+    loc_xe=xr.cross(world_ze, loc_ze, dim='row')
+    # y: co-elevation axis
+    loc_ye=xr.cross(loc_ze, loc_xe, dim='row')
+    # stacking those vectors in columns would give the local to world transformation matrix
+    # stacking them in rows gives the world to local transformation matrix
+    # therefore, we need to transpose the matrix. This can be done by renaming row to col for each vector
+    world_to_local=xr.concat([l.rename(row='col') for l in [loc_xe, loc_ye, loc_ze]], dim='row')
+    return world_to_local
 
-    conv_loc_to_cart = xr.concat([loc_xe, loc_ye, loc_ze], dim='col')
-    # invert
-    conv_cart_to_loc = xr.apply_ufunc(np.linalg.inv, conv_loc_to_cart, input_core_dims=[
-                                      ['col', 'row']], output_core_dims=[['col', 'row']])
-    return conv_cart_to_loc
-
-
-def _radar_model(gamma, omega, dgamma, domega, backlash=0, gammadir=None):
-    gamma = gamma+dgamma
-    if backlash != 0:
-        gamma = gamma+backlash*np.sign(gammadir)
-    omega = omega+domega
-    azi, elv = identity_scanner.forward(gamma, omega)
-    return azi, elv
+def format_input_xarray(arr):
+    if isinstance(arr, xr.DataArray):
+        return arr
+    elif isinstance(arr, np.ndarray):
+        if arr.ndim != 1:
+            raise ValueError('Input array must be 1D')
+        return xr.DataArray(arr, dims='sample')
+    elif isinstance(arr, (list, tuple)):
+        arr = np.array(arr)
+        if arr.ndim != 1:
+            raise ValueError('Input list or tuple must be 1D')
+        return xr.DataArray(arr, dims='sample')
+    else:
+        raise ValueError(f'Input must be a 1D numpy array or xarray DataArray. Got {type(arr)} instead.')
 
 
 def _get_tangential_coords(anchor_azi, anchor_elv, data_azi, data_elv):
-    conv_cart_to_loc = _cart_to_tangential_matrix(anchor_azi, anchor_elv)
-    phi_sun, theta_sun = _azi_elv_to_theta_phi(np.deg2rad(data_azi), np.deg2rad(data_elv))
+    anchor_azi = format_input_xarray(anchor_azi)
+    anchor_elv = format_input_xarray(anchor_elv)
+    data_azi = format_input_xarray(data_azi)
+    data_elv = format_input_xarray(data_elv)
+    conv_cart_to_loc = _cart_to_tangential_matrix(np.deg2rad(anchor_azi), np.deg2rad(anchor_elv))
+    # phi_sun, theta_sun = _azi_elv_to_theta_phi(np.deg2rad(data_azi), np.deg2rad(data_elv))
     sun_distance = 360/(2*np.pi)  # this way, 1deg sun offset is roughly 1 unit in the local coordinate system
-    sun_positions = xr.concat(_phitheta_to_cartesian(phi_sun, theta_sun, sun_distance), dim='col')
-    sun_pos_local = (conv_cart_to_loc*sun_positions).sum(dim='col')
+    # sun_positions = xr.concat(_phitheta_to_cartesian(phi_sun, theta_sun, sun_distance), dim='col')
+    positions = sun_distance* xr.concat(spherical_to_xyz(np.deg2rad(data_azi), np.deg2rad(data_elv)), dim='col')
+    sun_pos_local = (conv_cart_to_loc*positions).sum(dim='col')
     return sun_pos_local
 
 
@@ -143,20 +162,6 @@ def _get_tangential_coords(anchor_azi, anchor_elv, data_azi, data_elv):
 # ax.scatter(test_sun_pos_local.sel(row=0).values, test_sun_pos_local.sel(row=1).values)
 
 
-def _filter_datapoints(ds, lut):
-    # check that without correction the sun is close to the radar and within the lookup table
-    sun_pos_original = _get_tangential_coords(ds.scanner_azi, ds.scanner_elv, ds.sun_azi, ds.sun_elv)
-    lxmin, lxmax = lut.lx.min().item(), lut.lx.max().item()
-    lymin, lymax = lut.ly.min().item(), lut.ly.max().item()
-    valid = (sun_pos_original.sel(row=0) > lxmin) & (sun_pos_original.sel(row=0) < lxmax) & (
-        sun_pos_original.sel(row=1) > lymin) & (sun_pos_original.sel(row=1) < lymax)
-    if not valid.all():
-        logger.warning(
-            f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
-    ds_filtered = ds.where(valid, drop=True)
-    return ds_filtered
-
-
 # def _optimize_brute_force(ds, lut, bounds):
 #     steps = np.array([0.25, 0.5, 0.75])
 #     values = []
@@ -175,152 +180,25 @@ def _filter_datapoints(ds, lut):
 #     return best_params, best_rmse
 
 
-def _preprocess_data_sunscan(file, processor, lut):
-    ds_raw = open_znc(file)[['HSDco', 'Zg', 'elv_e', 'azi_e', 'aziv_e', 'elvv_e']]
-    # bring aziv_e and elvv_e to the same time coordinate as the rest
-    ds_v = ds_raw[['aziv_e', 'elvv_e']].rename(time_e='time_m', aziv_e='aziv_m', elvv_e='elvv_m')
-    ds_v.coords['time_m'] = ds_raw.time_m
-    reverse = True if 'rev' in file.stem else False
-    ds_processed = processor.process(ds_raw)  # , reverse=reverse)
-    ds = ds_processed.merge(ds_v)
-    sun_signal = ds.sun_signal
-    # sun_signal=np.pow(10, ds.sun_signal/10) #try with linear units
-    return ds
+# def _preprocess_data_sunscan(file, processor, lut):
+#     ds_raw = open_znc(file)[['HSDco', 'Zg', 'elv_e', 'azi_e', 'aziv_e', 'elvv_e']]
+#     # bring aziv_e and elvv_e to the same time coordinate as the rest
+#     ds_v = ds_raw[['aziv_e', 'elvv_e']].rename(time_e='time_m', aziv_e='aziv_m', elvv_e='elvv_m')
+#     ds_v.coords['time_m'] = ds_raw.time_m
+#     reverse = True if 'rev' in file.stem else False
+#     ds_processed = processor.process(ds_raw)  # , reverse=reverse)
+#     ds = ds_processed.merge(ds_v)
+#     sun_signal = ds.sun_signal
+#     # sun_signal=np.pow(10, ds.sun_signal/10) #try with linear units
+#     return ds
 
+def norm_signal(signal):
+    """Normalize the signal to the range [0, 1]."""
+    return (signal-signal.min())/(signal.max()-signal.min())
 
-def _simulate_sunscan(ds, lut, optimize_params=("dgamma", "domega", "fwhm_x", "fwhm_y", "backlash", "limb_darkening")):
-
-
-def _check_result_exists(csv_path, time):
-    csv_file = Path(csv_path)
-    if csv_file.exists():
-        df = pd.read_csv(csv_file, sep=';', index_col="time")
-        if time.strftime('%Y%m%d_%H%M%S') in df.index:
-            return True
-    return False
-
-
-def _save_simulation_result(csv_path, time, params, rmse, file_paths, overwrite=False):
-    # Prepare the row as a DataFrame
-    row_dict = {"time": time.strftime('%Y%m%d_%H%M%S'), "rmse": rmse}
-    for name, idx in PARAMETER_MAP.items():
-        row_dict[name] = params[idx]
-    row_dict['file_paths'] = [str(Path(f).name) for f in file_paths]
-    row = pd.DataFrame([row_dict]).set_index("time")
-
-    csv_file = Path(csv_path)
-    if csv_file.exists():
-        df = pd.read_csv(csv_file, sep=';', index_col="time")
-        if row.index[0] in df.index:
-            if not overwrite:
-                raise ValueError(f"Entry for time {row.index[0]} already exists. Set overwrite=True to replace.")
-            else:
-                df.loc[row.index[0]] = row.iloc[0]
-        else:
-            df = pd.concat([df, row])
-    else:
-        df = row
-
-    df.sort_index(inplace=True)
-    df.to_csv(csv_file, sep=';')
-    logger.info(f'Simulation results saved to {csv_file}.')
-
-
-def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax):
-    ax.axvline(x=0, color='k', linestyle='--')
-    ax.axhline(y=0, color='k', linestyle='--')
-    im = ax.scatter(sun_pos_plot.sel(row=0).values, sun_pos_plot.sel(row=1).values,
-                    c=sun_signal.values, vmin=0, vmax=1, cmap='turbo', s=9.0)
-    ax.set_xlabel('Cross-elevation [deg]')
-    ax.set_ylabel('Co-elevation [deg]')
-    ax.set_aspect('equal')
-    return im
-
-
-def _plot_sunscan_simulation(ds, lut, plot_params):
-    # plot_params=[0.3, 0.0, 0.4, 0.1, 0.0]
-    # plot_params=initial_guess
-    starttime = pd.to_datetime(ds.time_m.min().values)
-    sun_pos_original = _get_tangential_coords(ds.scanner_azi, ds.scanner_elv, ds.sun_azi, ds.sun_elv)
-    sun_pos_corrected = _get_tangential_coords(*_radar_model(ds.gamma, ds.omega,
-                                                             dgamma=plot_params[0], domega=plot_params[1], backlash=plot_params[4], gammav=ds.aziv_m), ds.sun_azi, ds.sun_elv)
-    sun_sim = _lookup(sun_pos_corrected, lut, fwhm_x=plot_params[2], fwhm_y=plot_params[3])
-    plane_full_x = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=0).min().item(),
-                                sun_pos_corrected.isel(row=0).max().item(), 100), dims='plane_x')
-    plane_full_y = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=1).min().item(),
-                                sun_pos_corrected.isel(row=1).max().item(), 100), dims='plane_y')
-    plane_full_x, plane_full_y = xr.broadcast(plane_full_x, plane_full_y)
-    sim_full = _lookup(xr.concat([plane_full_x, plane_full_y], dim='row'),
-                       lut, fwhm_x=plot_params[2], fwhm_y=plot_params[3])
-
-    #
-    fig, axs = plt.subplots(3, 2, figsize=(8, 12))  # , layout='tight')
-    ax = axs[0, 0]
-
-    def plot_points_gammaomega(azi, elv, c, ax):
-        im = ax.scatter(azi, elv, c=c, cmap='viridis', s=13)
-        ax.set_xlabel('Gamma ("Azimuth axis") [deg]')
-        ax.set_ylabel('Omega ("Elevation axis") [deg]')
-        return im
-    im = plot_points_gammaomega(ds.gamma, ds.omega, ds.sun_signal, ax)
-    fig.colorbar(im, ax=ax, label='Signal strength [dB]')
-    ax = axs[0, 1]
-    im = plot_points_gammaomega(ds.gamma, ds.omega, sun_sim, ax)
-    # remove y tick labels
-    ax.set_yticklabels([])
-    ax.set_ylabel('')
-    fig.colorbar(im, ax=ax, label='Simulated signal [normalized]')
-
-    # Plot measurements and simulation with the uncorrected tangent plane positions
-    ax = axs[1, 0]
-    im = _plot_points_tangent_plane(sun_pos_original, ds.sun_signal_norm, ax)
-    ax = axs[1, 1]
-    im = _plot_points_tangent_plane(sun_pos_original, sun_sim, ax)
-
-    scanner_azi_corrected, scanner_elv_corrected = sunproc.identity_radar_model(
-        ds.gamma+plot_params[0], ds.omega+plot_params[1])
-    # regardless of the anchor point, if we add the correction to the anchor point, we should get the center of the sun, therefore we simply take the mean
-    sun_center_corrected = _get_tangential_coords(
-        ds.scanner_azi, ds.scanner_elv, scanner_azi_corrected, scanner_elv_corrected).mean('time_m')
-    ax.axvline(sun_center_corrected.sel(row=0).item(), color='grey', linestyle='--')
-    ax.axhline(sun_center_corrected.sel(row=1).item(), color='grey', linestyle='--')
-    ax.set_yticklabels([])
-    ax.set_ylabel('')
-
-    # Plot measurements and correction in the tangent plane if taking the fitted correction parameters into account
-    # Now, the maximum should be at (0,0) sun-radar offset
-    ax = axs[2, 0]
-    im = _plot_points_tangent_plane(sun_pos_corrected, ds.sun_signal_norm, ax)
-    ax = axs[2, 1]
-    ax.pcolormesh(plane_full_x.values, plane_full_y.values, sim_full.values, cmap='turbo', alpha=0.2)
-    ax.contour(plane_full_x.values, plane_full_y.values, sim_full.values, levels=[
-               0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99], cmap='turbo', linewidths=1)
-    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim, ax)
-    ax.set_yticklabels([])
-    ax.set_ylabel('')
-
-    # Create a single colorbar for the lower row
-    cax = fig.add_axes([0.2, 0.0, 0.7, 0.02])  # Adjust position and size of the colorbar
-    fig.colorbar(im, cax=cax, orientation='horizontal', label='Normalized Signal Strength')
-    fig.suptitle(
-        f"{starttime.strftime('%Y-%m-%d %H:%M')}\ndgamma: {plot_params[0]:.2f}, domega: {plot_params[1]:.2f}, fwhm_azi: {plot_params[2]:.2f}, fwhm_elv: {plot_params[3]:.2f}, backlash: {plot_params[4]:.2f}\nlimb darkening: {plot_params[5]:.2f}", fontsize='x-large')
-    ax.set_aspect('equal')
-
-    axs[0, 0].annotate('Scanner Coordinates', xy=(-0.4, 0.5), xycoords='axes fraction',
-                       ha='center', va='center', fontsize=12, fontweight='bold', rotation=90)
-    axs[1, 0].annotate('Tangential Cartesian Plane', xy=(-0.35, 0.5), xycoords='axes fraction',
-                       ha='center', va='center', fontsize=12, fontweight='bold', rotation=90)
-    axs[2, 0].annotate('Tangential Plane w. Correction', xy=(-0.35, 0.5), xycoords='axes fraction',
-                       ha='center', va='center', fontsize=12, fontweight='bold', rotation=90)
-    # add column labels on the top
-    axs[0, 0].annotate('Measurement', xy=(0.5, 1.05), xycoords='axes fraction',
-                       ha='center', va='center', fontsize=12, fontweight='bold')
-    axs[0, 1].annotate('Simulation', xy=(0.5, 1.05), xycoords='axes fraction',
-                       ha='center', va='center', fontsize=12, fontweight='bold')
-    return fig, axs
 
 class SunSimulator(object):
-    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash, limb_darkening, sky, lut):
+    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash, limb_darkening, lut, sky=None):
         self.dgamma = dgamma
         self.domega = domega
         self.dtime = dtime
@@ -328,8 +206,31 @@ class SunSimulator(object):
         self.fwhm_y = fwhm_y
         self.backlash = backlash
         self.limb_darkening = limb_darkening
-        self.sky = sky
         self.lut = lut
+        self.sky = sky
+    
+    def get_params(self):
+        """Get the parameters of the simulator as a dictionary."""
+        return {
+            "dgamma": self.dgamma,
+            "domega": self.domega,
+            "dtime": self.dtime,
+            "fwhm_x": self.fwhm_x,
+            "fwhm_y": self.fwhm_y,
+            "backlash": self.backlash,
+            "limb_darkening": self.limb_darkening
+        }
+
+    def _radar_model(self, gamma, omega, gammav=None):
+        gamma = gamma+self.dgamma
+        if self.backlash != 0:
+            gamma = gamma+self.backlash*np.sign(gammav) # backlash only depends on the direction of movement
+        if self.dtime != 0:
+            gamma = gamma + self.dtime * gammav # a time offset will cause a mispointing depending on the speed of movement
+        omega = omega+self.domega
+        azi, elv = identity_scanner.forward(gamma, omega)
+        return azi, elv
+
 
     def _lookup(self, tangential_coordinates):
         # sun_sim=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y, method='nearest')
@@ -340,24 +241,41 @@ class SunSimulator(object):
         # sun_sim=lut.interp(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1)).interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
         return sun_sim
     
-    def forward(self, gamma, omega, time, gammadir=None):
-        sun_elv, sun_azi = self.sky.compute_sun_location(time+self.dtime)
-        sun_pos_local = _get_tangential_coords(*_radar_model(gamma, omega,dgamma=self.dgamma, domega=self.domega, backlash=self.backlash, gammadir=gammadir), sun_azi, sun_elv)
-        sun_sim = self._lookup(sun_pos_local)
+    def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav=None):
+        sunpos_tangential = _get_tangential_coords(*self._radar_model(gamma, omega, gammav=gammav), sun_azi, sun_elv)
+        return sunpos_tangential
+
+    def check_within_lut(self, gamma, omega, sun_azi, sun_elv):
+        sun_pos_original = _get_tangential_coords(gamma, omega, sun_azi, sun_elv)
+        lxmin, lxmax = self.lut.lx.min().item(), self.lut.lx.max().item()
+        lymin, lymax = self.lut.ly.min().item(), self.lut.ly.max().item()
+        valid = (sun_pos_original.sel(row=0) > lxmin) & (sun_pos_original.sel(row=0) < lxmax) & (
+            sun_pos_original.sel(row=1) > lymin) & (sun_pos_original.sel(row=1) < lymax)
+        return valid
+    
+    def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav=None):
+        # instead of calculating the su position based on the time, here we can pass it explicitly
+        sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav)
+        sun_sim = self._lookup(sunpos_tangential)
         return sun_sim
+    
+    def forward(self, gamma, omega, time, gammav=None):
+        sun_azi, sun_elv = self.sky.compute_sun_location(t=time)
+        return self.forward_sun(gamma, omega, sun_azi, sun_elv, gammav=gammav)
         
 
-def forward_model(params_dict, gamma, omega, time, gammadir, lut, sky):
-    simulator= SunSimulator(**params_dict, sky=sky, lut=lut)
-    sun_sim = simulator.forward(gamma, omega, time, gammadir)
+def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, lut):
+    simulator= SunSimulator(**params_dict, lut=lut)
+    # for performance reasons, we we use the forward_sun method and calculate the sun position once externally
+    sun_sim = simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav)
     return sun_sim
         
-def optimize_function(params_list, gamma, omega, time, signal_norm, gammadir, lut, sky):
+def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_norm, gammav, lut):
     params_dict= {k: params_list[v] for k, v in PARAMETER_MAP.items()}
-    sun_sim = forward_model(params_dict, gamma, omega, time, gammadir, lut, sky)
+    sun_sim = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, lut)
     error = sun_sim-signal_norm
     # se= (error**2).sum().item()
-    return rmse(error)
+    return rmse(error).item()
 
 
 class SunSimulationEstimator(object):
@@ -372,22 +290,25 @@ class SunSimulationEstimator(object):
                 lut_file.parent.mkdir(parents=True, exist_ok=True)
                 lut.to_netcdf(lut_file)
                 logger.info("Lookup table calculated and saved to %s.", lut_file)
+        elif not isinstance(lut, xr.DataArray):
+            raise ValueError("lut must be an xarray DataArray, got %s" % type(lut))
         self.lut=lut
         self.sky = sky
         if params_optimize is None:
-            params_optimize = sc_params['sun_sim_params_optimize']
+            params_optimize = sc_params['sunsim_params_optimize']
         if params_guess is None:
-            params_guess = sc_params['sun_sim_params_guess']
+            params_guess = sc_params['sunsim_params_guess']
         if params_bounds is None:
-            params_bounds = sc_params['sun_sim_params_bounds']
+            params_bounds = sc_params['sunsim_params_bounds']
         self.params_optimize = params_optimize.copy()
         self.params_guess = params_guess.copy()
         self.params_bounds = params_bounds.copy()
     
-    def fit(self, gamma, omega, time, signal, brute_force=True, brute_force_points=3):
-        signal_norm = (signal-signal.min())/(signal.max()-signal.min())
+    def fit(self, gamma, omega, time, signal, gammav, brute_force=True, brute_force_points=3):
+        signal_norm = norm_signal(signal)
         time_max = signal_norm.argmax()
 
+        # dgamma and domega can be None, in which case they are determined dynamically based on the scanner and sun position at the time of maximum signal
         params_guess = self.params_guess.copy()
         params_bounds = self.params_bounds.copy()
         if params_guess['dgamma'] is None or params_guess['domega'] is None:
@@ -403,18 +324,34 @@ class SunSimulationEstimator(object):
             if params_guess['domega'] is None:
                 params_guess['domega'] = domega_guess
                 params_bounds['domega'] = (domega_guess+params_bounds['domega'][0], domega_guess+params_bounds['domega'][1]) 
-        
-    
-        # ds = _filter_datapoints(ds, lut)
-        params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, PARAMETER_MAP)
 
-        optimize_args = (gamma, omega, time, signal_norm, gammadir, self.lut, self.sky)
+        gamma_xr= xr.DataArray(gamma, dims='sample')
+        omega_xr= xr.DataArray(omega, dims='sample')
+        time_xr= xr.DataArray(time, dims='sample')
+        signal_norm_xr= xr.DataArray(signal_norm, dims='sample')
+        gammav_xr= xr.DataArray(gammav, dims='sample')
+        sun_azi, sun_elv = xr.apply_ufunc(self.sky.compute_sun_location, time_xr, output_core_dims=[[],[]])
+        # check that with the initial guess, the relative difference between sun and scanner is within the lookup table
+        init_simulator= SunSimulator(**params_guess, lut=self.lut)
+        valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv)
+        if not valid.all():
+            logger.warning(f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
+            gamma_xr= gamma_xr.where(valid, drop=True)
+            omega_xr= omega_xr.where(valid, drop=True)
+            signal_norm_xr= signal_norm_xr.where(valid, drop=True)
+            gammav_xr= gammav_xr.where(valid, drop=True)
+            time_xr= time_xr.where(valid, drop=True)
+            sun_azi= sun_azi.where(valid, drop=True)
+            sun_elv= sun_elv.where(valid, drop=True)
+        
+        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_norm_xr, gammav_xr, self.lut)
+        params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, PARAMETER_MAP)
+        init_rmse = optimize_function(params_guess_list, *optimize_args)
         if brute_force:
             logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(self.params_optimize)} total)")
             brute_force_params, brute_force_rmse = optimize_brute_force(params_bounds_list, optimize_function, optimize_args=optimize_args, points=brute_force_points)
             logger.info(f"Best Parameters: {brute_force_params}")
             logger.info(f"Best RMSE: {brute_force_rmse:.6f}")
-            init_rmse = optimize_function(params_guess_list, *optimize_args)
             if init_rmse > brute_force_rmse:
                 logger.info(f"Brute force did improve the initial guess from {init_rmse:.6f} to {brute_force_rmse:.6f}")
                 params_guess_list = brute_force_params
@@ -429,59 +366,10 @@ class SunSimulationEstimator(object):
         # return res.x, res.fun  # params and rmse
         fit_result_list=res.x
         fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
-        fitted_simulator= SunSimulator(**fit_result_dict, sky=self.sky, lut=self.lut)
-        return fitted_simulator
+        logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {np.rad2deg(v):.4f}°" for k, v in fit_result_dict.items()]))
+        logger.info(f"Initial objective: {init_rmse:.6f}")
+        logger.info(f"Optimal objective: {res.fun:.6f}")
+        fitted_simulator= SunSimulator(**fit_result_dict, lut=self.lut, sky=self.sky)
+        return fitted_simulator, res.fun
 
 
-
-def operational_sunsim(file_paths, processor, sun_config, update_lut=None, overwrite_results='skip'):
-    """
-    Run the operational sun simulation for a given sunscan file.
-
-    This function processes a sunscan measurement file, simulates the sunscan using a lookup table (LUT),
-    fits simulation parameters to the measurement, saves the results, and generates a diagnostic plot.
-
-    Args:
-        file_paths (list of str or Path): List containing a single path to the sunscan file to process.
-        processor (SunscanProcessor): Processor object for handling sunscan data preprocessing.
-        sun_config (dict): Configuration dictionary with paths for LUT, results, and plot output.
-        update_lut (bool or None, optional): If True, recalculates and overwrites the LUT. If False, loads existing LUT.
-            If None, recalculates only if LUT does not exist. Default is None.
-        overwrite_results (str or bool, optional): Controls behavior if results already exist.
-            'skip' (default): Skip processing if results exist.
-            True: Overwrite existing results.
-            False: Raise an error if results exist.
-
-    Raises:
-        ValueError: If more than one file is provided in file_paths.
-
-    Returns:
-        None. Results are saved to disk and a plot is generated.
-
-    """
-    # remember: time needs to be converted to datetime, somehow like this: !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # ds.time.values.astype('datetime64[s]')+dt).tolist()
-    if len(file_paths) != 1:
-        raise ValueError(f"Expected one file, got {len(file_paths)}. Multiple files are not yet supported.")
-    file = Path(file_paths[0])
-    time = dt.datetime.strptime(file.stem[:15], '%Y%m%d_%H%M%S')
-    if overwrite_results == 'skip':
-        if _check_result_exists(sun_config['simulation_results'], time):
-            logger.info(
-                f"Simulation result for {time.strftime('%Y-%m-%d %H:%M:%S')} already exists. Skipping simulation.")
-            return
-    ds = _preprocess_data_sunscan(file, processor, lut)
-    params, rmse = _simulate_sunscan(ds, lut)
-    _save_simulation_result(sun_config['simulation_results'], time, params,
-                            rmse, file_paths, overwrite=overwrite_results)
-    fig, axs = _plot_sunscan_simulation(ds, lut, params)
-    plot_folder = Path(sun_config['plot_folder'])
-    outfile = plot_folder/time.strftime('%Y/%m')/(file.stem+'_simulation.png')
-    outfile.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(outfile, dpi=300, bbox_inches='tight')
-    logger.info(f"Simulation plot saved to {outfile}.")
-    # inp.write_log(outfile)
-
-
-if __name__ == "__main__":
-    __main__()

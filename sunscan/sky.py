@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 from skyfield.api import load, N, S, E, W, wgs84
 from skyfield import almanac
 
@@ -67,26 +68,35 @@ class SkyObject:
         """Compute the position of the sun at a given time.
 
         Args:
-            t (datetime or list of datetime or str): The time(s) to compute the sun position for.
+            t (datetime or list of datetime or str or numpy.ndarray): The time(s) to compute the sun position for.
                 If 'now', computes for the current time.
                 If datetime, computes for that specific time.
                 If list of datetime, computes for each time in the list.
+                If numpy.ndarray, converts datetime64 values to datetime objects.
 
         Raises:
-            ValueError: If t is not a datetime object, list of datetime objects, or 'now'.
+            ValueError: If t is not a datetime object, list of datetime objects, numpy array, or 'now'.
 
         Returns:
-            tuple: The elevation and azimuth of the sun at the specified time(s).
+            tuple: The elevation and azimuth of the sun at the specified time(s) in degrees.
 
         """
         if isinstance(t, str) and t == 'now':
             times = [self.ts.now()]
         elif isinstance(t, datetime):
             times = [self.ts.utc(t.year, t.month, t.day, t.hour, t.minute, t.second)]
-        elif isinstance(t, list):
-            times = [self.ts.utc(time.year, time.month, time.day, time.hour, time.minute, time.second) for time in t]
+        elif isinstance(t, np.datetime64):
+            # Handle single numpy datetime64
+            timestamp = pd.to_datetime(t)
+            times = [self.ts.utc(timestamp.year, timestamp.month, timestamp.day,
+                                 timestamp.hour, timestamp.minute, timestamp.second)]
+        elif (isinstance(t, np.ndarray) and np.issubdtype(t.dtype, np.datetime64)) or isinstance(t, list):
+            # Handle numpy array of datetime64 or list of datetime objects
+            time_series = pd.to_datetime(t)
+            times = [self.ts.utc(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second) 
+                    for dt in time_series.to_pydatetime()]
         else:
-            raise ValueError('t must be a datetime object or a list of datetime objects or "now"')
+            raise ValueError('t must be a datetime object, list of datetime objects, numpy array, or "now"')
 
         sun_elvs, sun_azis = [], []
         for time in times:
@@ -98,10 +108,10 @@ class SkyObject:
         if self.refraction:
             sun_elvs = self.add_refraction(sun_elvs)
 
-        if isinstance(t, datetime) or t == 'now':
-            return sun_elvs[0], sun_azis[0]
+        if isinstance(t, (datetime, np.datetime64)) or (isinstance(t, str) and t == 'now'):
+            return sun_azis[0], sun_elvs[0]
 
-        return sun_elvs, sun_azis
+        return sun_azis, sun_elvs
 
     def add_refraction(self, elevation):
         """Correct the true elevation angle with atmospheric refraction.
@@ -168,3 +178,6 @@ class SkyObject:
         end = self.ts.utc(date.replace(hour=23, minute=59, second=59))
         times, _ = almanac.find_settings(self.location, self.sun, start, end)
         return times[0].utc_datetime()
+    
+    def __repr__(self):
+        return f'SkyObject(location: '+str(self.location)+f'\nrefraction: {self.refraction}, humidity: {self.humidity})'
