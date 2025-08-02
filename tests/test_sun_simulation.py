@@ -30,8 +30,8 @@ def test_cart_to_tangential_matrix_identity():
 
 def test_cart_to_tangential_matrix_orthogonal():
     """Test that the transformation matrix is orthogonal (columns are orthonormal)."""
-    anchor_azi = np.array([np.pi/4])  # 45 degrees
-    anchor_elv = np.array([np.pi/6])  # 30 degrees
+    anchor_azi = np.array([45])  # 45 degrees
+    anchor_elv = np.array([30])  # 30 degrees
     
     transform_matrix = _cart_to_tangential_matrix(anchor_azi, anchor_elv)
     matrix = transform_matrix.squeeze().transpose('row', 'col', ...).values
@@ -49,7 +49,7 @@ def test_cart_to_tangential_matrix_orthogonal():
 def test_cart_to_tangential_matrix_north_pole():
     """Test transformation matrix at the north pole (elevation = 90 degrees)."""
     anchor_azi = np.array([0.0])
-    anchor_elv = np.array([np.pi/2])  # 90 degrees
+    anchor_elv = np.array([90])
     
     transform_matrix = _cart_to_tangential_matrix(anchor_azi, anchor_elv)
     matrix = transform_matrix.squeeze().values

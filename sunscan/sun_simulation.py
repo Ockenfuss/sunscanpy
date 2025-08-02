@@ -234,11 +234,6 @@ class SunSimulator(object):
         return valid
     
     def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav):
-        gamma=np.deg2rad(gamma)
-        omega=np.deg2rad(omega)
-        sun_azi=np.deg2rad(sun_azi)
-        sun_elv=np.deg2rad(sun_elv)
-        gammav=np.deg2rad(gammav)
         # get the tangential coordinates of the sun position
         # this is a bit of a hack, but since we are not using the time in the simulation,
         # instead of calculating the su position based on the time, here we can pass it explicitly
@@ -357,7 +352,7 @@ class SunSimulationEstimator(object):
         # return res.x, res.fun  # params and rmse
         fit_result_list=res.x
         fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
-        logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {np.rad2deg(v):.4f}°" for k, v in fit_result_dict.items()]))
+        logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {v:.4f}" for k, v in fit_result_dict.items()]))
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         logger.info(f"Initial objective: {init_rmse:.6f}")
         logger.info(f"Optimal objective: {res.fun:.6f}")

@@ -32,6 +32,8 @@ import sunscan
 
 
 ## Development
+Conventions:
+- all angles within `sunscan` are in degrees (except ikpy joint positions, which have to be radians)
 
 ### Running Tests
 

@@ -92,7 +92,7 @@ def _vector_to_azielv(z_axis, x_axis=None, eps=1e-8):
     """
     Calculates azimuth and elevation from a direction vector.
     If the z axis is vertical (x and y near zero), uses the x axis for azimuth.
-    Returns azimuth (radians), elevation (radians)
+    Returns azimuth (degrees), elevation (degrees)
     """
     z_axis = np.asarray(z_axis)
     # Elevation: angle from xy-plane
@@ -106,16 +106,16 @@ def _vector_to_azielv(z_axis, x_axis=None, eps=1e-8):
         azi = np.arctan2(x_axis[1], x_axis[0])
     else:
         azi = np.arctan2(z_axis[1], z_axis[0])
-    return azi, elv
+    return np.rad2deg(azi), np.rad2deg(elv)
 
 def _gam_om_to_joint_positions(gamma, omega):
-    """ gamma (azimuth) and omega (elevation) in radians"""
-    return [0, gamma, 0, omega, 0, 0]
+    """ gamma (azimuth) and omega (elevation) in degrees"""
+    return [0, np.deg2rad(gamma), 0, np.deg2rad(omega), 0, 0]
 
 def _joint_positions_to_gam_om(positions):
-    """ positions in radians"""
-    gamma = positions[1]
-    omega = positions[3]
+    """ positions in degrees"""
+    gamma = np.rad2deg(positions[1])
+    omega = np.rad2deg(positions[3])
     return gamma, omega
 
 class GeneralScanner(Scanner):

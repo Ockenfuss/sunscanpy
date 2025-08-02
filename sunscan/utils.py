@@ -9,17 +9,19 @@ def cartesian_to_spherical(unit_vectors):
         unit_vectors (np.ndarray): Array of shape (N, 3) with unit vectors.
         
     Returns:
-        tuple: Two arrays containing azimuth and elevation in radians.
+        tuple: Two arrays containing azimuth and elevation in degrees.
     """
     x, y, z = unit_vectors[:, 0], unit_vectors[:, 1], unit_vectors[:, 2]
     elv = np.arcsin(z)
     azi = np.arctan2(y, x)
-    return azi, elv
+    return np.rad2deg(azi), np.rad2deg(elv)
 
 def spherical_to_xyz(azi, elv):
-    x = np.cos(elv) * np.cos(azi)
-    y = np.cos(elv) * np.sin(azi)
-    z = np.sin(elv)
+    azi_rad= np.deg2rad(azi)
+    elv_rad= np.deg2rad(elv)
+    x = np.cos(elv_rad) * np.cos(azi_rad)
+    y = np.cos(elv_rad) * np.sin(azi_rad)
+    z = np.sin(elv_rad)
     return x, y, z
 
 def spherical_to_cartesian(azi, elv):
