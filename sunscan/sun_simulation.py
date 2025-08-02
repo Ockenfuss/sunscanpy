@@ -102,11 +102,15 @@ def calculate_lut(dgamma_range=None, domega_range=None, resolution=401, fwhm_x=N
 def _cart_to_tangential_matrix(anchor_azi, anchor_elv):
     """Matrix to convert from cartesian world coordinates to cartesian coordinates in the tangential plane, 
     anchored at the given position on the unit sphere."""
+    anchor_azi = format_input_xarray(anchor_azi)
+    anchor_elv = format_input_xarray(anchor_elv)
     loc_ze = xr.concat(spherical_to_xyz(anchor_azi, anchor_elv), dim='row')
     world_ze= xr.zeros_like(loc_ze)
     world_ze[{'row': 2}] = 1.0
     # x: cross-elevation axis
     loc_xe=xr.cross(world_ze, loc_ze, dim='row')
+    # normalize
+    loc_xe = loc_xe / xr.apply_ufunc(np.linalg.norm, loc_xe, input_core_dims=[['row']], kwargs={'axis': -1})
     # y: co-elevation axis
     loc_ye=xr.cross(loc_ze, loc_xe, dim='row')
     # stacking those vectors in columns would give the local to world transformation matrix
@@ -132,8 +136,6 @@ def format_input_xarray(arr):
 
 
 def _get_tangential_coords(anchor_azi, anchor_elv, data_azi, data_elv):
-    anchor_azi = format_input_xarray(anchor_azi)
-    anchor_elv = format_input_xarray(anchor_elv)
     data_azi = format_input_xarray(data_azi)
     data_elv = format_input_xarray(data_elv)
     conv_cart_to_loc = _cart_to_tangential_matrix(np.deg2rad(anchor_azi), np.deg2rad(anchor_elv))
@@ -161,36 +163,6 @@ def _get_tangential_coords(anchor_azi, anchor_elv, data_azi, data_elv):
 # fig, ax=plt.subplots(figsize=(10,10))
 # ax.scatter(test_sun_pos_local.sel(row=0).values, test_sun_pos_local.sel(row=1).values)
 
-
-# def _optimize_brute_force(ds, lut, bounds):
-#     steps = np.array([0.25, 0.5, 0.75])
-#     values = []
-#     for i, (low, high) in enumerate(bounds):
-#         if low == high:
-#             values.append([low])
-#         else:
-#             values.append(low+steps*(high-low))
-#     param_combinations = list(product(*values))
-#     best_rmse, best_params = float('inf'), None
-#     for params in param_combinations:
-#         rmse = _objective(params, ds, lut)
-#         if rmse < best_rmse:
-#             best_rmse = rmse
-#             best_params = params
-#     return best_params, best_rmse
-
-
-# def _preprocess_data_sunscan(file, processor, lut):
-#     ds_raw = open_znc(file)[['HSDco', 'Zg', 'elv_e', 'azi_e', 'aziv_e', 'elvv_e']]
-#     # bring aziv_e and elvv_e to the same time coordinate as the rest
-#     ds_v = ds_raw[['aziv_e', 'elvv_e']].rename(time_e='time_m', aziv_e='aziv_m', elvv_e='elvv_m')
-#     ds_v.coords['time_m'] = ds_raw.time_m
-#     reverse = True if 'rev' in file.stem else False
-#     ds_processed = processor.process(ds_raw)  # , reverse=reverse)
-#     ds = ds_processed.merge(ds_v)
-#     sun_signal = ds.sun_signal
-#     # sun_signal=np.pow(10, ds.sun_signal/10) #try with linear units
-#     return ds
 
 def norm_signal(signal):
     """Normalize the signal to the range [0, 1]."""
@@ -281,17 +253,21 @@ def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_norm, 
 class SunSimulationEstimator(object):
     def __init__(self, sky, params_optimize=None, params_guess=None, params_bounds=None, lut=None):
         if lut is None:
-            if Path(sc_params['lutpath']).exists():
+            lut=Path(sc_params['lutpath'])
+        if isinstance(lut, str):
+            lut= Path(lut)
+        if isinstance(lut, Path):
+            lutpath=lut
+            if lutpath.exists():
                 logger.info('Loading lookup table...')
-                lut = xr.open_dataarray(sc_params['lutpath'])
+                lut = xr.open_dataarray(lutpath)
             else:
                 lut = calculate_lut()
-                lut_file = Path(sc_params['lutpath'])
-                lut_file.parent.mkdir(parents=True, exist_ok=True)
-                lut.to_netcdf(lut_file)
-                logger.info("Lookup table calculated and saved to %s.", lut_file)
+                lutpath.parent.mkdir(parents=True, exist_ok=True)
+                lut.to_netcdf(lutpath)
+                logger.info("Lookup table calculated and saved to %s.", lutpath)
         elif not isinstance(lut, xr.DataArray):
-            raise ValueError("lut must be an xarray DataArray, got %s" % type(lut))
+            raise ValueError("lut must be an xarray DataArray, string, Pathlib.Path or None, got %s" % type(lut))
         self.lut=lut
         self.sky = sky
         if params_optimize is None:
