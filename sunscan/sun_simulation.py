@@ -138,11 +138,11 @@ def format_input_xarray(arr):
 def _get_tangential_coords(anchor_azi, anchor_elv, data_azi, data_elv):
     data_azi = format_input_xarray(data_azi)
     data_elv = format_input_xarray(data_elv)
-    conv_cart_to_loc = _cart_to_tangential_matrix(np.deg2rad(anchor_azi), np.deg2rad(anchor_elv))
-    # phi_sun, theta_sun = _azi_elv_to_theta_phi(np.deg2rad(data_azi), np.deg2rad(data_elv))
+    conv_cart_to_loc = _cart_to_tangential_matrix(anchor_azi, anchor_elv)
+    # phi_sun, theta_sun = _azi_elv_to_theta_phi(data_azi), data_elv))
     sun_distance = 360/(2*np.pi)  # this way, 1deg sun offset is roughly 1 unit in the local coordinate system
     # sun_positions = xr.concat(_phitheta_to_cartesian(phi_sun, theta_sun, sun_distance), dim='col')
-    positions = sun_distance* xr.concat(spherical_to_xyz(np.deg2rad(data_azi), np.deg2rad(data_elv)), dim='col')
+    positions = sun_distance* xr.concat(spherical_to_xyz(data_azi, data_elv), dim='col')
     sun_pos_local = (conv_cart_to_loc*positions).sum(dim='col')
     return sun_pos_local
 
@@ -193,45 +193,60 @@ class SunSimulator(object):
             "limb_darkening": self.limb_darkening
         }
 
-    def _radar_model(self, gamma, omega, gammav=None):
+    def _radar_model(self, gamma, omega, gammav):
         gamma = gamma+self.dgamma
-        if self.backlash != 0:
-            gamma = gamma+self.backlash*np.sign(gammav) # backlash only depends on the direction of movement
-        if self.dtime != 0:
-            gamma = gamma + self.dtime * gammav # a time offset will cause a mispointing depending on the speed of movement
+        gamma = gamma+self.backlash*np.sign(gammav) # backlash only depends on the direction of movement
+        gamma = gamma + self.dtime * gammav # a time offset will cause a mispointing depending on the speed of movement
         omega = omega+self.domega
         azi, elv = identity_scanner.forward(gamma, omega)
         return azi, elv
 
+    def _lookup_interp(self, **kwargs):
+        """Select scalar dimensions in the lookup table directly and interpolate the rest."""
+        sizes={k:self.lut.sizes[k] for k in kwargs.keys()}
+        len1=[k for k, v in sizes.items() if v == 1]
+        longer= [k for k, v in sizes.items() if v > 1]
+        lut=self.lut.sel(**{k: kwargs[k] for k in len1})
+        if len(longer) > 0:
+            lut = lut.interp(**{k: kwargs[k] for k in longer})
+        return lut
 
     def _lookup(self, tangential_coordinates):
         # sun_sim=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y, method='nearest')
-        sun_sim = self.lut.interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(
-            row=1), fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
+        # sun_sim = self.lut.interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(
+        #     row=1), fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
+        sun_sim= self._lookup_interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(row=1), fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
         # sun_sim=lut.isel(limb_darkening=-1).interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y)
         # sun_sim=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), method='nearest').interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
         # sun_sim=lut.interp(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1)).interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
         return sun_sim
     
-    def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav=None):
+    def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav):
         sunpos_tangential = _get_tangential_coords(*self._radar_model(gamma, omega, gammav=gammav), sun_azi, sun_elv)
         return sunpos_tangential
 
-    def check_within_lut(self, gamma, omega, sun_azi, sun_elv):
-        sun_pos_original = _get_tangential_coords(gamma, omega, sun_azi, sun_elv)
+    def check_within_lut(self, gamma, omega, sun_azi, sun_elv, gammav):
+        sun_pos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav=gammav)
         lxmin, lxmax = self.lut.lx.min().item(), self.lut.lx.max().item()
         lymin, lymax = self.lut.ly.min().item(), self.lut.ly.max().item()
-        valid = (sun_pos_original.sel(row=0) > lxmin) & (sun_pos_original.sel(row=0) < lxmax) & (
-            sun_pos_original.sel(row=1) > lymin) & (sun_pos_original.sel(row=1) < lymax)
+        valid = (sun_pos_tangential.sel(row=0) > lxmin) & (sun_pos_tangential.sel(row=0) < lxmax) & (
+            sun_pos_tangential.sel(row=1) > lymin) & (sun_pos_tangential.sel(row=1) < lymax)
         return valid
     
-    def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav=None):
+    def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav):
+        gamma=np.deg2rad(gamma)
+        omega=np.deg2rad(omega)
+        sun_azi=np.deg2rad(sun_azi)
+        sun_elv=np.deg2rad(sun_elv)
+        gammav=np.deg2rad(gammav)
+        # get the tangential coordinates of the sun position
+        # this is a bit of a hack, but since we are not using the time in the simulation,
         # instead of calculating the su position based on the time, here we can pass it explicitly
         sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav)
         sun_sim = self._lookup(sunpos_tangential)
         return sun_sim
     
-    def forward(self, gamma, omega, time, gammav=None):
+    def forward(self, gamma, omega, time, gammav):
         sun_azi, sun_elv = self.sky.compute_sun_location(t=time)
         return self.forward_sun(gamma, omega, sun_azi, sun_elv, gammav=gammav)
         
@@ -309,7 +324,7 @@ class SunSimulationEstimator(object):
         sun_azi, sun_elv = xr.apply_ufunc(self.sky.compute_sun_location, time_xr, output_core_dims=[[],[]])
         # check that with the initial guess, the relative difference between sun and scanner is within the lookup table
         init_simulator= SunSimulator(**params_guess, lut=self.lut)
-        valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv)
+        valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv, gammav_xr)
         if not valid.all():
             logger.warning(f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
             gamma_xr= gamma_xr.where(valid, drop=True)
@@ -343,6 +358,7 @@ class SunSimulationEstimator(object):
         fit_result_list=res.x
         fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
         logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {np.rad2deg(v):.4f}°" for k, v in fit_result_dict.items()]))
+        init_rmse = optimize_function(params_guess_list, *optimize_args)
         logger.info(f"Initial objective: {init_rmse:.6f}")
         logger.info(f"Optimal objective: {res.fun:.6f}")
         fitted_simulator= SunSimulator(**fit_result_dict, lut=self.lut, sky=self.sky)
