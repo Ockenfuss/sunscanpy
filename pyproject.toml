@@ -32,7 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    # "pytest>=6.0",
+    "pytest>=8.0",
     # "pytest-cov",
     # "black",
     # "flake8",
@@ -43,6 +43,9 @@ dev = [
 # Homepage = "https://github.com/yourusername/sunscan"
 # Repository = "https://github.com/yourusername/sunscan"
 # Issues = "https://github.com/yourusername/sunscan/issues"
+
+[tool.setuptools.package-data]
+sunscan = ["examples/*.nc"]
 
 [tool.setuptools.packages.find]
 where = ["."]
