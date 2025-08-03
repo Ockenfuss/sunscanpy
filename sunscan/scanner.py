@@ -49,37 +49,43 @@ class IdentityScanner(Scanner):
         return gamma, omega
     
 class BacklashScanner(Scanner):
-    """Identity Scanner model, but with global offsets and backlash correction."""
-    def __init__(self, dgamma, domega, dtime, backlash):
+    """Identity Scanner model, but with global offsets and backlash correction.
+    
+       A time offset will be applied to both axes and create an angle offset depending on the speed of movement.
+       A backlash correction is applied individually to the axes and only depends on the direction of movement.
+    """
+    def __init__(self, dgamma, domega, dtime, backlash_gamma):
         self.dgamma= dgamma
         self.domega= domega
         self.dtime= dtime
-        self.backlash= backlash
+        self.backlash_gamma= backlash_gamma
         self.identity_scanner = IdentityScanner()
     
-    def apply_offsets(self, gamma, omega, gammav):
+    def apply_offsets(self, gamma, omega, gammav, omegav):
         gamma_corr = gamma+self.dgamma
-        gamma_corr = gamma_corr+self.backlash*np.sign(gammav) # backlash only depends on the direction of movement
-        gamma_corr = gamma_corr + self.dtime * gammav # a time offset will cause a mispointing depending on the speed of movement
+        gamma_corr = gamma_corr+self.backlash_gamma*np.sign(gammav)
+        gamma_corr = gamma_corr + self.dtime * gammav
         omega_corr = omega+self.domega
+        omega_corr = omega_corr + self.dtime * omegav
         return gamma_corr, omega_corr
     
-    def remove_offsets(self, gamma, omega, gammav):
+    def remove_offsets(self, gamma, omega, gammav, omegav):
         gamma = gamma - self.dgamma
-        gamma = gamma - self.backlash * np.sign(gammav)
+        gamma = gamma - self.backlash_gamma * np.sign(gammav)
         gamma = gamma - self.dtime * gammav
         omega = omega - self.domega
+        omega = omega - self.dtime * omegav
         return gamma, omega
 
     
-    def forward(self, gamma, omega, gammav):
-        gamma_corr, omega_corr = self.apply_offsets(gamma, omega, gammav)
+    def forward(self, gamma, omega, gammav, omegav):
+        gamma_corr, omega_corr = self.apply_offsets(gamma, omega, gammav, omegav)
         azi, elv = self.identity_scanner.forward(gamma_corr, omega_corr)
         return azi, elv
     
-    def inverse(self, azi, elv, gammav, reverse=False):
+    def inverse(self, azi, elv, gammav, omegav, reverse=False):
         gamma, omega = self.identity_scanner.inverse(azi, elv, reverse=reverse)
-        gamma, omega = self.remove_offsets(gamma, omega, gammav)
+        gamma, omega = self.remove_offsets(gamma, omega, gammav, omegav)
         return gamma, omega
     
     def get_params(self):
@@ -88,7 +94,7 @@ class BacklashScanner(Scanner):
             'dgamma': self.dgamma,
             'domega': self.domega,
             'dtime': self.dtime,
-            'backlash': self.backlash
+            'backlash_gamma': self.backlash_gamma
         }
 
 
@@ -164,7 +170,7 @@ def _joint_positions_to_gam_om(positions):
     return gamma, omega
 
 class GeneralScanner(Scanner):
-    def __init__(self, azi_offset, elv_offset, alpha, delta, beta, epsilon, dtime, backlash):
+    def __init__(self, azi_offset, elv_offset, alpha, delta, beta, epsilon, dtime, backlash_gamma):
         """General scanner model M_G(gamma, omega) = (phi, theta)
         This model assumes a scanner with pan-tilt mechanism and a dish.
         The parameters are:
@@ -178,10 +184,10 @@ class GeneralScanner(Scanner):
         self.delta = delta
         self.beta = beta
         self.epsilon = epsilon
-        self.backlash_scanner= BacklashScanner(dtime=dtime, backlash=backlash, dgamma=0, domega=0) #the constant offsets are handled by the chain
+        self.backlash_scanner= BacklashScanner(dtime=dtime, backlash_gamma=backlash_gamma, dgamma=0, domega=0) #the constant offsets are handled by the chain
         self.chain = generate_pt_chain(azi_offset, elv_offset, alpha, delta, beta, epsilon)
     
-    def forward_pointing(self, gamma, omega, gammav=0):
+    def forward_pointing(self, gamma, omega, gammav=0, omegav=0):
         """Calculate the pointing of the radar, i.e. the direction of the z-axis of the last link in the chain.
 
         Returns:
@@ -189,15 +195,15 @@ class GeneralScanner(Scanner):
         """
         gamma= np.atleast_1d(gamma)
         omega= np.atleast_1d(omega)
-        gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav)
+        gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav, omegav)
         radar_pointing=[self.chain.forward_kinematics(_gam_om_to_joint_positions(g, o))[:3, 2] for g, o in zip(gamma, omega)]
         return np.array(radar_pointing)
 
 
-    def forward(self, gamma, omega, gammav=0):
+    def forward(self, gamma, omega, gammav=0, omegav=0):
         azimuth=[]
         elevation=[]
-        gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav)
+        gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav, omegav)
         for g, o in zip(gamma, omega):
             trans_matrix=self.chain.forward_kinematics(_gam_om_to_joint_positions(g,o))[:3, :3]
             z_axis=trans_matrix[:, 2]
@@ -208,7 +214,7 @@ class GeneralScanner(Scanner):
         return np.array(azimuth), np.array(elevation)
     
 
-    def inverse(self, azi, elv, gammav=0):
+    def inverse(self, azi, elv, gammav=0, omegav=0):
         azi= np.atleast_1d(azi)
         elv= np.atleast_1d(elv)
         gamma, omega=[]
@@ -221,7 +227,7 @@ class GeneralScanner(Scanner):
             gamma.append(g)
             omega.append(o)
         gamma, omega = np.array(gamma), np.array(omega)
-        gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav)
+        gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav, omegav)
         return gamma, omega
     
     def get_params(self):
@@ -247,6 +253,6 @@ class GeneralScanner(Scanner):
                f"Beta: {self.beta:.2f} º\n" + \
                f"Epsilon: {self.epsilon:.2f} º\n" + \
                f"Time Offset: {self.backlash_scanner.dtime:.2f} s\n" + \
-               f"Backlash: {self.backlash_scanner.backlash:.2f} º"
+               f"Backlash: {self.backlash_scanner.backlash_gamma:.2f} º"
 
     

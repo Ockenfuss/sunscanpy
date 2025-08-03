@@ -28,8 +28,6 @@ def difference_angles(vec1, vec2):
 def forward_model(gamma, omega, params):
     """For a given set of parameters and azimuth/elevation angles, calculate the pointing direction of the radar.
     Args:
-        azi (float or np.ndarray): Azimuth angle(s) in radians.
-        elv (float or np.ndarray): Elevation angle(s) in radians.
         params (dict): Parameters for the scanner model
     
     Returns:
@@ -42,8 +40,10 @@ def forward_model(gamma, omega, params):
         delta=params.get("delta", 0.0),
         beta=params.get("beta", 0.0),
         epsilon=params.get("epsilon", 0.0),
+        dtime=0.0, # when estimating, we assume the (gamma, omega) (azi,elv) pairs are calculated stationary, i.e. neither the time offset nor the backlash are relevant
+        backlash_gamma=0.0
     )
-    radar_pointing = scanner.forward_pointing(gamma, omega)
+    radar_pointing = scanner.forward_pointing(gamma, omega, gammav=0, omegav=0) #assume stationary pairs.
     return radar_pointing
 
 
@@ -65,7 +65,9 @@ def optimize_function(params_list, gamma, omega, target_vectors):
 
 
 class ScannerEstimator(object):
-    def __init__(self, params_optimize=None, params_guess=None, params_bounds=None):
+    def __init__(self, params_optimize=None, params_guess=None, params_bounds=None, dtime=0, backlash_gamma=0):
+        """
+        """
         if params_optimize is None:
             params_optimize = sc_params['scanner_params_optimize']
         if params_guess is None:
@@ -75,6 +77,8 @@ class ScannerEstimator(object):
         self.params_optimize = params_optimize
         self.params_guess = params_guess
         self.params_bounds = params_bounds
+        self.dtime= dtime #dtime and backlash are not used in the estimation (assumption of stationary calibration pairs). They are only added after fitting, when the scanner is returned.
+        self.backlash_gamma= backlash_gamma
     
     def fit(self, gamma, omega, azi_b, elv_b, brute_force=True, brute_force_points=3):
         logger.info('Starting optimization')
@@ -83,7 +87,7 @@ class ScannerEstimator(object):
         init_guess_list, bounds_list= get_parameter_lists(self.params_optimize, init_guess_rad, parameter_bounds_rad, PARAMETER_MAP)
         pointing_b=spherical_to_cartesian(azi_b, elv_b)
         #%%
-        if brute_force
+        if brute_force:
             logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(self.params_optimize)} total)")
             brute_force_params, brute_force_rmse = optimize_brute_force(bounds_list, optimize_function, optimize_args=(gamma, omega, pointing_b), points=brute_force_points)
             logger.info(f"Best Parameters: {np.rad2deg(brute_force_params)}")
@@ -102,6 +106,6 @@ class ScannerEstimator(object):
         )
         fit_result_list=opt_res.x
         fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
-        fitted_scanner= GeneralScanner(**fit_result_dict)
+        fitted_scanner= GeneralScanner(**fit_result_dict, dtime=self.dtime, backlash_gamma=self.backlash_gamma)
         return fitted_scanner
 

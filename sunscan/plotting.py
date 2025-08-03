@@ -17,19 +17,19 @@ def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax):
     return im
 
 
-def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_original, gammav, sky):
+def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_original, gammav, omegav, sky):
     sun_azi, sun_elv=sky.compute_sun_location(time)
     signal_normed = norm_signal(signal_original)
     starttime = pd.to_datetime(time.min())
-    sun_sim= simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav=gammav)
+    sun_sim= simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     simulator_noback=copy.copy(simulator)
     simulator_noback.dtime=0
     simulator_noback.backlash=0
 
-    sun_pos_noback = simulator_noback.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav)
-    sun_sim_noback = simulator_noback.forward_sun(gamma, omega, sun_azi, sun_elv, gammav=gammav)
+    sun_pos_noback = simulator_noback.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
+    sun_sim_noback = simulator_noback.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
 
-    sun_pos_corrected = simulator.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav)
+    sun_pos_corrected = simulator.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     plane_full_x = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=0).min().item(),
                                 sun_pos_corrected.isel(row=0).max().item(), 100), dims='plane_x')
     plane_full_y = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=1).min().item(),
