@@ -33,6 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "jupyter",
     # "pytest-cov",
     # "black",
     # "flake8",
