@@ -19,7 +19,7 @@ PARAMETER_MAP = {
     "fwhm_x": 2,
     "fwhm_y": 3,
     "dtime": 4,
-    "backlash": 5,
+    "backlash_gamma": 5,
     "limb_darkening": 6
 }
 identity_scanner = IdentityScanner()
@@ -170,26 +170,24 @@ def norm_signal(signal):
 
 
 class SunSimulator(object):
-    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash, limb_darkening, lut, sky=None):
-        self.dgamma = dgamma
-        self.domega = domega
+    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut, sky=None):
         self.fwhm_x = fwhm_x
         self.fwhm_y = fwhm_y
         self.limb_darkening = limb_darkening
         self.lut = lut
         self.sky = sky
-        self.backlash_scanner = BacklashScanner(dgamma, domega, dtime, backlash)
+        self.local_scanner = BacklashScanner(dgamma, domega, dtime, backlash_gamma)
     
     def get_params(self):
         """Get the parameters of the simulator as a dictionary."""
-        backlash_params = self.backlash_scanner.get_params()
+        scanner_params = self.local_scanner.get_params()
         return {
-            "dgamma": self.dgamma,
-            "domega": self.domega,
-            "dtime": backlash_params['dtime'],
+            "dgamma": scanner_params['dgamma'],
+            "domega": scanner_params['domega'],
+            "dtime": scanner_params['dtime'],
             "fwhm_x": self.fwhm_x,
             "fwhm_y": self.fwhm_y,
-            "backlash": backlash_params['backlash'],
+            "backlash_gamma": scanner_params['backlash_gamma'],
             "limb_darkening": self.limb_darkening
         }
 
@@ -213,41 +211,49 @@ class SunSimulator(object):
         # sun_sim=lut.interp(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1)).interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
         return sun_sim
     
-    def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav):
-        beam_azi, beam_elv = self.backlash_scanner.forward(gamma, omega, gammav=gammav)
+    def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
+        beam_azi, beam_elv = self.local_scanner.forward(gamma, omega, gammav=gammav, omegav=omegav)
         sunpos_tangential = _get_tangential_coords(beam_azi, beam_elv, sun_azi, sun_elv)
         return sunpos_tangential
 
-    def check_within_lut(self, gamma, omega, sun_azi, sun_elv, gammav):
-        sun_pos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav=gammav)
+    def check_within_lut(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
+        sun_pos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav=gammav, omegav=omegav)
         lxmin, lxmax = self.lut.lx.min().item(), self.lut.lx.max().item()
         lymin, lymax = self.lut.ly.min().item(), self.lut.ly.max().item()
         valid = (sun_pos_tangential.sel(row=0) > lxmin) & (sun_pos_tangential.sel(row=0) < lxmax) & (
             sun_pos_tangential.sel(row=1) > lymin) & (sun_pos_tangential.sel(row=1) < lymax)
         return valid
     
-    def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav):
+    def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
         # get the tangential coordinates of the sun position
-        # this is a bit of a hack, but since we are not using the time in the simulation,
-        # instead of calculating the su position based on the time, here we can pass it explicitly
-        sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav)
+        # Since we are not using the time in the simulation, it is possible to calcualte the sun positions only once externally and save the expensive calculation in the fit every time.
+        # Therefore, this version of forward exists, which takes the sun position as input.
+        sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
         sun_sim = self._lookup(sunpos_tangential)
         return sun_sim
     
-    def forward(self, gamma, omega, time, gammav):
+    def forward(self, gamma, omega, time, gammav, omegav):
         sun_azi, sun_elv = self.sky.compute_sun_location(t=time)
-        return self.forward_sun(gamma, omega, sun_azi, sun_elv, gammav=gammav)
+        return self.forward_sun(gamma, omega, sun_azi, sun_elv, gammav=gammav, omegav=omegav)
         
+    def get_calibrated_pair(self, time, reverse):
+        """Given a time, calculate the sun position at this time and the corresponding scanner angles.
+        """
+        #This function implements the "stationary assumption": We calculate a pair of scanner and celestial positions assuming gammav and omegav = 0. The scanner fit function will then do the same assumption.
+        beam_azi, beam_elv = self.sky.compute_sun_location(t=time)
+        gamma_s, omega_s=self.local_scanner.inverse(beam_azi, beam_elv, gammav=0.0, omegav=0.0, reverse=reverse)
+        return gamma_s, omega_s, beam_azi, beam_elv
 
-def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, lut):
+
+def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut):
     simulator= SunSimulator(**params_dict, lut=lut)
     # for performance reasons, we we use the forward_sun method and calculate the sun position once externally
-    sun_sim = simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav)
+    sun_sim = simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     return sun_sim
         
-def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_norm, gammav, lut):
+def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_norm, gammav, omegav, lut):
     params_dict= {k: params_list[v] for k, v in PARAMETER_MAP.items()}
-    sun_sim = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, lut)
+    sun_sim = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut)
     error = sun_sim-signal_norm
     # se= (error**2).sum().item()
     return rmse(error).item()
@@ -283,7 +289,7 @@ class SunSimulationEstimator(object):
         self.params_guess = params_guess.copy()
         self.params_bounds = params_bounds.copy()
     
-    def fit(self, gamma, omega, time, signal, gammav, brute_force=True, brute_force_points=3):
+    def fit(self, gamma, omega, time, signal, gammav, omegav, brute_force=True, brute_force_points=3):
         signal_norm = norm_signal(signal)
         time_max = signal_norm.argmax()
 
@@ -310,27 +316,29 @@ class SunSimulationEstimator(object):
         time_xr= xr.DataArray(time, dims='sample')
         signal_norm_xr= xr.DataArray(signal_norm, dims='sample')
         gammav_xr= xr.DataArray(gammav, dims='sample')
+        omegav_xr= xr.DataArray(omegav, dims='sample')
         sun_azi, sun_elv = xr.apply_ufunc(self.sky.compute_sun_location, time_xr, output_core_dims=[[],[]])
         # check that with the initial guess, the relative difference between sun and scanner is within the lookup table
         init_simulator= SunSimulator(**params_guess, lut=self.lut)
-        valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv, gammav_xr)
+        valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv, gammav_xr, omegav_xr)
         if not valid.all():
             logger.warning(f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
             gamma_xr= gamma_xr.where(valid, drop=True)
             omega_xr= omega_xr.where(valid, drop=True)
             signal_norm_xr= signal_norm_xr.where(valid, drop=True)
             gammav_xr= gammav_xr.where(valid, drop=True)
+            omegav_xr= omegav_xr.where(valid, drop=True)
             time_xr= time_xr.where(valid, drop=True)
             sun_azi= sun_azi.where(valid, drop=True)
             sun_elv= sun_elv.where(valid, drop=True)
         
-        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_norm_xr, gammav_xr, self.lut)
+        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_norm_xr, gammav_xr, omegav_xr, self.lut)
         params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, PARAMETER_MAP)
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         if brute_force:
             logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(self.params_optimize)} total)")
             brute_force_params, brute_force_rmse = optimize_brute_force(params_bounds_list, optimize_function, optimize_args=optimize_args, points=brute_force_points)
-            logger.info(f"Best Parameters: {brute_force_params}")
+            logger.info(f"Best Parameters: " + ", ".join(brute_force_params))
             logger.info(f"Best RMSE: {brute_force_rmse:.6f}")
             if init_rmse > brute_force_rmse:
                 logger.info(f"Brute force did improve the initial guess from {init_rmse:.6f} to {brute_force_rmse:.6f}")
