@@ -67,7 +67,7 @@ class BacklashScanner(Scanner):
         gamma_corr = gamma_corr + self.dtime * gammav
         omega_corr = omega+self.domega
         omega_corr = omega_corr + self.dtime * omegav
-        return gamma_corr, omega_corr
+        return np.round(gamma_corr, 12)%360, omega_corr
     
     def remove_offsets(self, gamma, omega, gammav, omegav):
         gamma = gamma - self.dgamma
@@ -75,7 +75,7 @@ class BacklashScanner(Scanner):
         gamma = gamma - self.dtime * gammav
         omega = omega - self.domega
         omega = omega - self.dtime * omegav
-        return gamma, omega
+        return np.round(gamma, 12)%360.0, omega
 
     
     def forward(self, gamma, omega, gammav, omegav):

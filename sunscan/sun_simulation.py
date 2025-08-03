@@ -338,7 +338,7 @@ class SunSimulationEstimator(object):
         if brute_force:
             logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(self.params_optimize)} total)")
             brute_force_params, brute_force_rmse = optimize_brute_force(params_bounds_list, optimize_function, optimize_args=optimize_args, points=brute_force_points)
-            logger.info(f"Best Parameters: " + ", ".join(brute_force_params))
+            logger.info(f"Best Parameters: " + ", ".join([f"{v:.4f}" for v in brute_force_params]))
             logger.info(f"Best RMSE: {brute_force_rmse:.6f}")
             if init_rmse > brute_force_rmse:
                 logger.info(f"Brute force did improve the initial guess from {init_rmse:.6f} to {brute_force_rmse:.6f}")
