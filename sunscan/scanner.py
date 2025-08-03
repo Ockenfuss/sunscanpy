@@ -40,12 +40,8 @@ class IdentityScanner(Scanner):
         reverse part of the gamma-omega space.
 
         """
-        if reverse:
-            gamma = (azi - 180) % 360
-            omega = 180 - elv
-        else:
-            gamma = azi
-            omega = elv
+        gamma=xr.where(reverse, (azi - 180) % 360, azi)
+        omega=xr.where(reverse, 180 - elv, elv)
         return gamma, omega
     
 class BacklashScanner(Scanner):
@@ -100,8 +96,14 @@ class BacklashScanner(Scanner):
 
 
 #%% 2D pan tilt system
-def generate_pt_chain(azi_offset, elv_offset, alpha, delta, beta, epsilon):
+def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon):
     d=1
+    gamma_offset=np.deg2rad(gamma_offset)
+    omega_offset=np.deg2rad(omega_offset)
+    alpha=np.deg2rad(alpha)
+    delta=np.deg2rad(delta)
+    beta=np.deg2rad(beta)
+    epsilon=np.deg2rad(epsilon)
     pt_chain= Chain(name='pan_tilt', links=[
         OriginLink(),
         URDFLink(
@@ -113,7 +115,7 @@ def generate_pt_chain(azi_offset, elv_offset, alpha, delta, beta, epsilon):
         URDFLink(
             name='azimuth_offset',
             origin_translation=[0, 0, d],
-            origin_orientation=[0, 0, azi_offset],
+            origin_orientation=[0, 0, gamma_offset],
             rotation=[0, 0, 1], 
         ),
         URDFLink(
@@ -125,7 +127,7 @@ def generate_pt_chain(azi_offset, elv_offset, alpha, delta, beta, epsilon):
         URDFLink(
             name='elevation_offset',
             origin_translation=[0, 0, d/10],
-            origin_orientation=[0, np.pi/2-elv_offset, 0],
+            origin_orientation=[0, np.pi/2-omega_offset, 0],
             rotation=[0, 1, 0],
         ),
         URDFLink(
@@ -170,22 +172,19 @@ def _joint_positions_to_gam_om(positions):
     return gamma, omega
 
 class GeneralScanner(Scanner):
-    def __init__(self, azi_offset, elv_offset, alpha, delta, beta, epsilon, dtime, backlash_gamma):
+    def __init__(self, gamma_offset, omega_offset, alpha, delta, beta, epsilon, dtime, backlash_gamma):
         """General scanner model M_G(gamma, omega) = (phi, theta)
         This model assumes a scanner with pan-tilt mechanism and a dish.
-        The parameters are:
-            azi_offset: azimuth offset of the pan-tilt mechanism
-            elv_offset: elevation offset of the pan-tilt mechanism
         """
         super().__init__()
-        self.azi_offset = azi_offset
-        self.elv_offset = elv_offset
+        self.gamma_offset = gamma_offset
+        self.omega_offset = omega_offset
         self.alpha = alpha
         self.delta = delta
         self.beta = beta
         self.epsilon = epsilon
         self.backlash_scanner= BacklashScanner(dtime=dtime, backlash_gamma=backlash_gamma, dgamma=0, domega=0) #the constant offsets are handled by the chain
-        self.chain = generate_pt_chain(azi_offset, elv_offset, alpha, delta, beta, epsilon)
+        self.chain = generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon)
     
     def forward_pointing(self, gamma, omega, gammav=0, omegav=0):
         """Calculate the pointing of the radar, i.e. the direction of the z-axis of the last link in the chain.
@@ -201,17 +200,17 @@ class GeneralScanner(Scanner):
 
 
     def forward(self, gamma, omega, gammav=0, omegav=0):
-        azimuth=[]
-        elevation=[]
+        azi_list=[]
+        elv_list=[]
         gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav, omegav)
         for g, o in zip(gamma, omega):
             trans_matrix=self.chain.forward_kinematics(_gam_om_to_joint_positions(g,o))[:3, :3]
             z_axis=trans_matrix[:, 2]
             x_axis=trans_matrix[:, 0]
-            azi_rad, elv_rad = _vector_to_azielv(z_axis, x_axis)
-            azimuth.append(azi_rad)
-            elevation.append(elv_rad)
-        return np.array(azimuth), np.array(elevation)
+            azi, elv = _vector_to_azielv(z_axis, x_axis)
+            azi_list.append(azi)
+            elv_list.append(elv)
+        return np.array(azi_list), np.array(elv_list)
     
 
     def inverse(self, azi, elv, gammav=0, omegav=0):
@@ -234,20 +233,20 @@ class GeneralScanner(Scanner):
         """Get the parameters of the scanner as a dictionary."""
         backlash_params = self.backlash_scanner.get_params()
         return {
-            'azi_offset': self.azi_offset,
-            'elv_offset': self.elv_offset,
+            'gamma_offset': self.gamma_offset,
+            'omega_offset': self.omega_offset,
             'alpha': self.alpha,
             'delta': self.delta,
             'beta': self.beta,
             'epsilon': self.epsilon,
             'dtime': backlash_params['dtime'],
-            'backlash': backlash_params['backlash'],
+            'backlash_gamma': backlash_params['backlash_gamma'],
         }
     
     def __repr__(self):
         return "General Scanner Model:\n" + \
-               f"Azi Offset: {self.azi_offset:.2f} º\n" + \
-               f"Elv Offset: {self.elv_offset:.2f} º\n" + \
+               f"Azi Offset: {self.gamma_offset:.2f} º\n" + \
+               f"Elv Offset: {self.omega_offset:.2f} º\n" + \
                f"Alpha: {self.alpha:.2f} º\n" + \
                f"Delta: {self.delta:.2f} º\n" + \
                f"Beta: {self.beta:.2f} º\n" + \
