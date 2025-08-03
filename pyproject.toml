@@ -37,6 +37,7 @@ dev = [
     # "black",
     # "flake8",
     # "mypy",
+    "streamlit",
 ]
 
 [project.urls]

@@ -2,18 +2,19 @@ import numpy as np
 import scipy.optimize as opt
 from sunscan import sc_params, logger
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force, rmse
-from sunscan.scanner import GeneralScanner
+from sunscan.scanner import GeneralScanner, IdentityScanner
 from sunscan.utils import spherical_to_cartesian
 
 
 PARAMETER_MAP = {
-    'azi_offset': 0,
-    'elv_offset': 1,
+    'gamma_offset': 0,
+    'omega_offset': 1,
     'alpha': 2,
     'delta': 3,
     'beta': 4,
     'epsilon': 5,
 }
+identity_scanner = IdentityScanner()
 
 def difference_angles(vec1, vec2):
     """
@@ -34,12 +35,7 @@ def forward_model(gamma, omega, params):
         np.ndarray: Array of shape (N, 3) with the pointing direction vectors.
     """
     scanner=GeneralScanner(
-        azi_offset=params.get("azi_offset", 0.0),
-        elv_offset=params.get("elv_offset", 0.0),
-        alpha=params.get("alpha", 0.0),
-        delta=params.get("delta", 0.0),
-        beta=params.get("beta", 0.0),
-        epsilon=params.get("epsilon", 0.0),
+        **params,
         dtime=0.0, # when estimating, we assume the (gamma, omega) (azi,elv) pairs are calculated stationary, i.e. neither the time offset nor the backlash are relevant
         backlash_gamma=0.0
     )
@@ -81,31 +77,53 @@ class ScannerEstimator(object):
         self.backlash_gamma= backlash_gamma
     
     def fit(self, gamma, omega, azi_b, elv_b, brute_force=True, brute_force_points=3):
+
+        # gamma_offset and omega_offset can be None, in which case they are determined dynamically based on the mean difference between the scanner coordinates and beam position
+        params_guess = self.params_guess.copy()
+        params_bounds = self.params_bounds.copy()
+        if params_guess['gamma_offset'] is None or params_guess['omega_offset'] is None:
+            reverse = omega > 90
+            gamma_id, omega_id = identity_scanner.inverse(azi_b, elv_b, reverse=reverse)
+            gamoff_guess = gamma_id-gamma
+            gamoff_guess = gamoff_guess % 360
+            gamoff_guess = np.mean(gamoff_guess)
+            omoff = omega_id-omega
+            omoff = np.mean(omoff)
+            logger.info(f"Estimated gamma_offset: {gamoff_guess:.4f}, omega_offset: {omoff:.4f}")
+            if params_guess['gamma_offset'] is None:
+                params_guess['gamma_offset'] = gamoff_guess
+                params_bounds['gamma_offset'] = (gamoff_guess+params_bounds['gamma_offset'][0], gamoff_guess+params_bounds['gamma_offset'][1]) # in case the guess for go is determined dynamically, the bounds are interpreted as relative to the guess
+            if params_guess['omega_offset'] is None:
+                params_guess['omega_offset'] = omoff
+                params_bounds['omega_offset'] = (omoff+params_bounds['omega_offset'][0], omoff+params_bounds['omega_offset'][1]) 
         logger.info('Starting optimization')
-        init_guess_rad= {k:np.deg2rad(v) for k,v in self.params_guess.items()}
-        parameter_bounds_rad= {k:(np.deg2rad(v[0]), np.deg2rad(v[1])) for k,v in self.params_bounds.items()}  
-        init_guess_list, bounds_list= get_parameter_lists(self.params_optimize, init_guess_rad, parameter_bounds_rad, PARAMETER_MAP)
+        params_guess_list, bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, PARAMETER_MAP)
         pointing_b=spherical_to_cartesian(azi_b, elv_b)
+        optimize_args = (gamma, omega, pointing_b)
         #%%
         if brute_force:
             logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(self.params_optimize)} total)")
-            brute_force_params, brute_force_rmse = optimize_brute_force(bounds_list, optimize_function, optimize_args=(gamma, omega, pointing_b), points=brute_force_points)
-            logger.info(f"Best Parameters: {np.rad2deg(brute_force_params)}")
+            brute_force_params, brute_force_rmse = optimize_brute_force(bounds_list, optimize_function, optimize_args=optimize_args, points=brute_force_points)
+            logger.info(f"Best Parameters: " + ", ".join([f"{v:.4f}" for v in brute_force_params]))
             logger.info(f"Best RMSE: {brute_force_rmse:.6f}")
-            init_rmse=optimize_function(init_guess_list, gamma, omega, pointing_b)
+            init_rmse=optimize_function(params_guess_list, gamma, omega, pointing_b)
             if init_rmse > brute_force_rmse:
                 logger.info(f"Brute force did improve the initial guess from {init_rmse:.6f} to {brute_force_rmse:.6f}")
-                init_guess_list = brute_force_params
+                params_guess_list = brute_force_params
         #%%
         opt_res = opt.minimize(
             fun=optimize_function,
-            x0=init_guess_list,
+            x0=params_guess_list,
             method="Nelder-Mead",
-            args=(gamma, omega, pointing_b),
+            args=optimize_args,
             bounds=bounds_list,
         )
         fit_result_list=opt_res.x
         fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
+        logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {v:.4f}" for k, v in fit_result_dict.items()]))
+        init_rmse = optimize_function(params_guess_list, *optimize_args)
+        logger.info(f"Initial objective: {init_rmse:.6f}")
+        logger.info(f"Optimal objective: {opt_res.fun:.6f}")
         fitted_scanner= GeneralScanner(**fit_result_dict, dtime=self.dtime, backlash_gamma=self.backlash_gamma)
-        return fitted_scanner
+        return fitted_scanner, opt_res.fun
 

@@ -344,7 +344,7 @@ class SunSimulationEstimator(object):
                 logger.info(f"Brute force did improve the initial guess from {init_rmse:.6f} to {brute_force_rmse:.6f}")
                 params_guess_list = brute_force_params
         #
-        res = minimize(optimize_function, params_guess_list, args=optimize_args, bounds=params_bounds_list, method='Nelder-Mead')
+        opt_res = minimize(optimize_function, params_guess_list, args=optimize_args, bounds=params_bounds_list, method='Nelder-Mead')
         # alternative to minimize:
         # from scipy.optimize import differential_evolution
         # res = differential_evolution(objective, bounds, args=(ds,))
@@ -352,13 +352,13 @@ class SunSimulationEstimator(object):
         #     f"dgamma: {res.x[0]:.2f}, domega: {res.x[1]:.2f}, fwhm_azi: {res.x[2]:.2f}, fwhm_elv: {res.x[3]:.2f}, azi_backlash: {res.x[4]:.2f}, limb_darkening: {res.x[5]:.2f}")
         # logger.info(f'RMSE: {res.fun:.3f}')
         # return res.x, res.fun  # params and rmse
-        fit_result_list=res.x
+        fit_result_list=opt_res.x
         fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
         logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {v:.4f}" for k, v in fit_result_dict.items()]))
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         logger.info(f"Initial objective: {init_rmse:.6f}")
-        logger.info(f"Optimal objective: {res.fun:.6f}")
+        logger.info(f"Optimal objective: {opt_res.fun:.6f}")
         fitted_simulator= SunSimulator(**fit_result_dict, lut=self.lut, sky=self.sky)
-        return fitted_simulator, res.fun
+        return fitted_simulator, opt_res.fun
 
 
