@@ -10,7 +10,7 @@ from scipy.signal import convolve2d
 
 from sunscan import logger, sc_params
 from sunscan.utils import spherical_to_xyz
-from sunscan.scanner import IdentityScanner
+from sunscan.scanner import IdentityScanner, BacklashScanner
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force, rmse
 
 PARAMETER_MAP = {
@@ -173,33 +173,25 @@ class SunSimulator(object):
     def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash, limb_darkening, lut, sky=None):
         self.dgamma = dgamma
         self.domega = domega
-        self.dtime = dtime
         self.fwhm_x = fwhm_x
         self.fwhm_y = fwhm_y
-        self.backlash = backlash
         self.limb_darkening = limb_darkening
         self.lut = lut
         self.sky = sky
+        self.backlash_scanner = BacklashScanner(dgamma, domega, dtime, backlash)
     
     def get_params(self):
         """Get the parameters of the simulator as a dictionary."""
+        backlash_params = self.backlash_scanner.get_params()
         return {
             "dgamma": self.dgamma,
             "domega": self.domega,
-            "dtime": self.dtime,
+            "dtime": backlash_params['dtime'],
             "fwhm_x": self.fwhm_x,
             "fwhm_y": self.fwhm_y,
-            "backlash": self.backlash,
+            "backlash": backlash_params['backlash'],
             "limb_darkening": self.limb_darkening
         }
-
-    def _radar_model(self, gamma, omega, gammav):
-        gamma = gamma+self.dgamma
-        gamma = gamma+self.backlash*np.sign(gammav) # backlash only depends on the direction of movement
-        gamma = gamma + self.dtime * gammav # a time offset will cause a mispointing depending on the speed of movement
-        omega = omega+self.domega
-        azi, elv = identity_scanner.forward(gamma, omega)
-        return azi, elv
 
     def _lookup_interp(self, **kwargs):
         """Select scalar dimensions in the lookup table directly and interpolate the rest."""
@@ -222,7 +214,8 @@ class SunSimulator(object):
         return sun_sim
     
     def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav):
-        sunpos_tangential = _get_tangential_coords(*self._radar_model(gamma, omega, gammav=gammav), sun_azi, sun_elv)
+        beam_azi, beam_elv = self.backlash_scanner.forward(gamma, omega, gammav=gammav)
+        sunpos_tangential = _get_tangential_coords(beam_azi, beam_elv, sun_azi, sun_elv)
         return sunpos_tangential
 
     def check_within_lut(self, gamma, omega, sun_azi, sun_elv, gammav):
@@ -304,6 +297,7 @@ class SunSimulationEstimator(object):
             gamma_sun, omega_sun = identity_scanner.inverse(sun_azi, sun_elv, reverse=reverse)
             dgamma_guess = gamma_sun-gamma_max
             domega_guess = omega_sun-omega_max
+            dgamma_guess = dgamma_guess % 360
             if params_guess['dgamma'] is None:
                 params_guess['dgamma'] = dgamma_guess
                 params_bounds['dgamma'] = (dgamma_guess+params_bounds['dgamma'][0], dgamma_guess+params_bounds['dgamma'][1]) # in case the guess for dgamma is determined dynamically, the bounds are interpreted as relative to the guess

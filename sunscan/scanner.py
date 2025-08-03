@@ -47,6 +47,51 @@ class IdentityScanner(Scanner):
             gamma = azi
             omega = elv
         return gamma, omega
+    
+class BacklashScanner(Scanner):
+    """Identity Scanner model, but with global offsets and backlash correction."""
+    def __init__(self, dgamma, domega, dtime, backlash):
+        self.dgamma= dgamma
+        self.domega= domega
+        self.dtime= dtime
+        self.backlash= backlash
+        self.identity_scanner = IdentityScanner()
+    
+    def apply_offsets(self, gamma, omega, gammav):
+        gamma_corr = gamma+self.dgamma
+        gamma_corr = gamma_corr+self.backlash*np.sign(gammav) # backlash only depends on the direction of movement
+        gamma_corr = gamma_corr + self.dtime * gammav # a time offset will cause a mispointing depending on the speed of movement
+        omega_corr = omega+self.domega
+        return gamma_corr, omega_corr
+    
+    def remove_offsets(self, gamma, omega, gammav):
+        gamma = gamma - self.dgamma
+        gamma = gamma - self.backlash * np.sign(gammav)
+        gamma = gamma - self.dtime * gammav
+        omega = omega - self.domega
+        return gamma, omega
+
+    
+    def forward(self, gamma, omega, gammav):
+        gamma_corr, omega_corr = self.apply_offsets(gamma, omega, gammav)
+        azi, elv = self.identity_scanner.forward(gamma_corr, omega_corr)
+        return azi, elv
+    
+    def inverse(self, azi, elv, gammav, reverse=False):
+        gamma, omega = self.identity_scanner.inverse(azi, elv, reverse=reverse)
+        gamma, omega = self.remove_offsets(gamma, omega, gammav)
+        return gamma, omega
+    
+    def get_params(self):
+        """Get the parameters of the scanner as a dictionary."""
+        return {
+            'dgamma': self.dgamma,
+            'domega': self.domega,
+            'dtime': self.dtime,
+            'backlash': self.backlash
+        }
+
+
 
 #%% 2D pan tilt system
 def generate_pt_chain(azi_offset, elv_offset, alpha, delta, beta, epsilon):
@@ -119,7 +164,7 @@ def _joint_positions_to_gam_om(positions):
     return gamma, omega
 
 class GeneralScanner(Scanner):
-    def __init__(self, azi_offset, elv_offset, alpha, delta, beta, epsilon):
+    def __init__(self, azi_offset, elv_offset, alpha, delta, beta, epsilon, dtime, backlash):
         """General scanner model M_G(gamma, omega) = (phi, theta)
         This model assumes a scanner with pan-tilt mechanism and a dish.
         The parameters are:
@@ -133,9 +178,10 @@ class GeneralScanner(Scanner):
         self.delta = delta
         self.beta = beta
         self.epsilon = epsilon
+        self.backlash_scanner= BacklashScanner(dtime=dtime, backlash=backlash, dgamma=0, domega=0) #the constant offsets are handled by the chain
         self.chain = generate_pt_chain(azi_offset, elv_offset, alpha, delta, beta, epsilon)
     
-    def forward_pointing(self, gamma, omega):
+    def forward_pointing(self, gamma, omega, gammav=0):
         """Calculate the pointing of the radar, i.e. the direction of the z-axis of the last link in the chain.
 
         Returns:
@@ -143,15 +189,17 @@ class GeneralScanner(Scanner):
         """
         gamma= np.atleast_1d(gamma)
         omega= np.atleast_1d(omega)
-        radar_pointing=[self.chain.forward_kinematics(_gam_om_to_joint_positions(a, e))[:3, 2] for a, e in zip(gamma, omega)]
+        gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav)
+        radar_pointing=[self.chain.forward_kinematics(_gam_om_to_joint_positions(g, o))[:3, 2] for g, o in zip(gamma, omega)]
         return np.array(radar_pointing)
 
 
-    def forward(self, gamma, omega):
+    def forward(self, gamma, omega, gammav=0):
         azimuth=[]
         elevation=[]
-        for a, e in zip(gamma, omega):
-            trans_matrix=self.chain.forward_kinematics(_gam_om_to_joint_positions(a,e))[:3, :3]
+        gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav)
+        for g, o in zip(gamma, omega):
+            trans_matrix=self.chain.forward_kinematics(_gam_om_to_joint_positions(g,o))[:3, :3]
             z_axis=trans_matrix[:, 2]
             x_axis=trans_matrix[:, 0]
             azi_rad, elv_rad = _vector_to_azielv(z_axis, x_axis)
@@ -160,37 +208,45 @@ class GeneralScanner(Scanner):
         return np.array(azimuth), np.array(elevation)
     
 
-    def inverse(self, azi, elv):
+    def inverse(self, azi, elv, gammav=0):
         azi= np.atleast_1d(azi)
         elv= np.atleast_1d(elv)
-        positions=[]
+        gamma, omega=[]
         for a,e in zip(azi, elv):
             # calculate the orientation vector
             unit_vector= spherical_to_cartesian(a,e)
             initial_guess=_gam_om_to_joint_positions(a, e)
             position=self.chain.inverse_kinematics(target_orientation=unit_vector, orientation_mode='Z', initial_position=initial_guess)
-            position=_joint_positions_to_gam_om(position)
-            positions.append(position)
-        return np.array(positions)
+            g,o=_joint_positions_to_gam_om(position)
+            gamma.append(g)
+            omega.append(o)
+        gamma, omega = np.array(gamma), np.array(omega)
+        gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav)
+        return gamma, omega
     
     def get_params(self):
         """Get the parameters of the scanner as a dictionary."""
+        backlash_params = self.backlash_scanner.get_params()
         return {
             'azi_offset': self.azi_offset,
             'elv_offset': self.elv_offset,
             'alpha': self.alpha,
             'delta': self.delta,
             'beta': self.beta,
-            'epsilon': self.epsilon
+            'epsilon': self.epsilon,
+            'dtime': backlash_params['dtime'],
+            'backlash': backlash_params['backlash'],
         }
     
     def __repr__(self):
         return "General Scanner Model:\n" + \
-               f"Azi Offset: {np.rad2deg(self.azi_offset):.2f} º\n" + \
-               f"Elv Offset: {np.rad2deg(self.elv_offset):.2f} º\n" + \
-               f"Alpha: {np.rad2deg(self.alpha):.2f} º\n" + \
-               f"Delta: {np.rad2deg(self.delta):.2f} º\n" + \
-               f"Beta: {np.rad2deg(self.beta):.2f} º\n" + \
-               f"Epsilon: {np.rad2deg(self.epsilon):.2f} º"
+               f"Azi Offset: {self.azi_offset:.2f} º\n" + \
+               f"Elv Offset: {self.elv_offset:.2f} º\n" + \
+               f"Alpha: {self.alpha:.2f} º\n" + \
+               f"Delta: {self.delta:.2f} º\n" + \
+               f"Beta: {self.beta:.2f} º\n" + \
+               f"Epsilon: {self.epsilon:.2f} º\n" + \
+               f"Time Offset: {self.backlash_scanner.dtime:.2f} s\n" + \
+               f"Backlash: {self.backlash_scanner.backlash:.2f} º"
 
     
