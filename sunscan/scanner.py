@@ -3,9 +3,7 @@ import numpy as np
 import ikpy
 from ikpy.chain import Chain
 from ikpy.link import OriginLink, URDFLink
-import ikpy.utils
-import ikpy.utils.plot
-from sunscan.utils import spherical_to_cartesian
+from sunscan.math_utils import spherical_to_cartesian
 
 
 
@@ -29,9 +27,9 @@ class IdentityScanner(Scanner):
         For omega <=90 degrees, it is the identity function: gamma=phi, omega=theta.
         """
         reverse = omega > 90
-        azi = xr.where(reverse, (gamma+180) % 360, gamma)
+        azi = xr.where(reverse, (gamma+180) , gamma)
         elv = xr.where(reverse, 180 - omega, omega)
-        return azi, elv
+        return azi%360, elv
 
     def inverse(self, azi, elv, reverse=False):
         """Invert the identity radar model.
@@ -40,9 +38,9 @@ class IdentityScanner(Scanner):
         reverse part of the gamma-omega space.
 
         """
-        gamma=xr.where(reverse, (azi - 180) % 360, azi)
+        gamma=xr.where(reverse, (azi - 180) , azi)
         omega=xr.where(reverse, 180 - elv, elv)
-        return gamma, omega
+        return gamma%360, omega
     
 class BacklashScanner(Scanner):
     """Identity Scanner model, but with global offsets and backlash correction.

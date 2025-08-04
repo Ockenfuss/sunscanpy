@@ -9,9 +9,10 @@ from scipy.optimize import minimize
 from scipy.signal import convolve2d
 
 from sunscan import logger, sc_params
-from sunscan.utils import spherical_to_xyz
+from sunscan.math_utils import spherical_to_xyz
 from sunscan.scanner import IdentityScanner, BacklashScanner
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force, rmse
+from sunscan.utils import guess_offsets, format_input_xarray
 
 PARAMETER_MAP = {
     "dgamma": 0,
@@ -118,22 +119,6 @@ def _cart_to_tangential_matrix(anchor_azi, anchor_elv):
     # therefore, we need to transpose the matrix. This can be done by renaming row to col for each vector
     world_to_local=xr.concat([l.rename(row='col') for l in [loc_xe, loc_ye, loc_ze]], dim='row')
     return world_to_local
-
-def format_input_xarray(arr):
-    if isinstance(arr, xr.DataArray):
-        return arr
-    elif isinstance(arr, np.ndarray):
-        if arr.ndim != 1:
-            raise ValueError('Input array must be 1D')
-        return xr.DataArray(arr, dims='sample')
-    elif isinstance(arr, (list, tuple)):
-        arr = np.array(arr)
-        if arr.ndim != 1:
-            raise ValueError('Input list or tuple must be 1D')
-        return xr.DataArray(arr, dims='sample')
-    else:
-        raise ValueError(f'Input must be a 1D numpy array or xarray DataArray. Got {type(arr)} instead.')
-
 
 def _get_tangential_coords(anchor_azi, anchor_elv, data_azi, data_elv):
     data_azi = format_input_xarray(data_azi)
@@ -298,12 +283,8 @@ class SunSimulationEstimator(object):
         params_bounds = self.params_bounds.copy()
         if params_guess['dgamma'] is None or params_guess['domega'] is None:
             gamma_max, omega_max = gamma[time_max], omega[time_max]
-            reverse = omega_max > 90
             sun_azi, sun_elv = self.sky.compute_sun_location(t=time[time_max])
-            gamma_sun, omega_sun = identity_scanner.inverse(sun_azi, sun_elv, reverse=reverse)
-            dgamma_guess = gamma_sun-gamma_max
-            domega_guess = omega_sun-omega_max
-            dgamma_guess = dgamma_guess % 360
+            dgamma_guess, domega_guess = guess_offsets(gamma_max, omega_max, sun_azi, sun_elv)
             if params_guess['dgamma'] is None:
                 params_guess['dgamma'] = dgamma_guess
                 params_bounds['dgamma'] = (dgamma_guess+params_bounds['dgamma'][0], dgamma_guess+params_bounds['dgamma'][1]) # in case the guess for dgamma is determined dynamically, the bounds are interpreted as relative to the guess

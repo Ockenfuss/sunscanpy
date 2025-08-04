@@ -1,32 +1,32 @@
 # General helper functions
 import numpy as np
 import xarray as xr
+from sunscan.scanner import IdentityScanner
 
-def cartesian_to_spherical(unit_vectors):
-    """Convert unit vectors to spherical coordinates (azimuth, elevation).
-    
-    Args:
-        unit_vectors (np.ndarray): Array of shape (N, 3) with unit vectors.
-        
-    Returns:
-        tuple: Two arrays containing azimuth and elevation in degrees.
-    """
-    x, y, z = unit_vectors[:, 0], unit_vectors[:, 1], unit_vectors[:, 2]
-    elv = np.arcsin(z)
-    azi = np.arctan2(y, x)
-    return np.rad2deg(azi), np.rad2deg(elv)
+def guess_offsets(gamma, omega, azi_b, elv_b):
+    reverse = omega > 90
+    gamma_id, omega_id = IdentityScanner().inverse(azi_b, elv_b, reverse=reverse)
+    gamoff_guess = gamma_id-gamma
+    gamoff_guess = np.atleast_1d(gamoff_guess)
+    gamoff_guess = np.sort(gamoff_guess)[len(gamoff_guess)//2]  # median element
+    gamoff_guess = gamoff_guess % 360
+    omoff = omega_id-omega
+    omoff = np.atleast_1d(omoff)
+    omoff = np.sort(omoff)[len(omoff)//2]
+    return gamoff_guess, omoff
 
-def spherical_to_xyz(azi, elv):
-    azi_rad= np.deg2rad(azi)
-    elv_rad= np.deg2rad(elv)
-    x = np.cos(elv_rad) * np.cos(azi_rad)
-    y = np.cos(elv_rad) * np.sin(azi_rad)
-    z = np.sin(elv_rad)
-    return x, y, z
-
-def spherical_to_cartesian(azi, elv):
-    x,y,z= spherical_to_xyz(azi, elv)
-    # Stack as (N, 3) array of unit vectors
-    unit_vectors = np.stack((x, y, z), axis=-1)
-    return unit_vectors
+def format_input_xarray(arr):
+    if isinstance(arr, xr.DataArray):
+        return arr
+    elif isinstance(arr, np.ndarray):
+        if arr.ndim != 1:
+            raise ValueError('Input array must be 1D')
+        return xr.DataArray(arr, dims='sample')
+    elif isinstance(arr, (list, tuple)):
+        arr = np.array(arr)
+        if arr.ndim != 1:
+            raise ValueError('Input list or tuple must be 1D')
+        return xr.DataArray(arr, dims='sample')
+    else:
+        raise ValueError(f'Input must be a 1D numpy array or xarray DataArray. Got {type(arr)} instead.')
 

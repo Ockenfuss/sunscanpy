@@ -3,7 +3,8 @@ import scipy.optimize as opt
 from sunscan import sc_params, logger
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force, rmse
 from sunscan.scanner import GeneralScanner, IdentityScanner
-from sunscan.utils import spherical_to_cartesian
+from sunscan.math_utils import spherical_to_cartesian
+from sunscan.utils import guess_offsets
 
 
 PARAMETER_MAP = {
@@ -82,20 +83,14 @@ class ScannerEstimator(object):
         params_guess = self.params_guess.copy()
         params_bounds = self.params_bounds.copy()
         if params_guess['gamma_offset'] is None or params_guess['omega_offset'] is None:
-            reverse = omega > 90
-            gamma_id, omega_id = identity_scanner.inverse(azi_b, elv_b, reverse=reverse)
-            gamoff_guess = gamma_id-gamma
-            gamoff_guess = gamoff_guess % 360
-            gamoff_guess = np.mean(gamoff_guess)
-            omoff = omega_id-omega
-            omoff = np.mean(omoff)
-            logger.info(f"Estimated gamma_offset: {gamoff_guess:.4f}, omega_offset: {omoff:.4f}")
+            gamoff_guess, omoff_guess= guess_offsets(gamma, omega, azi_b, elv_b)
+            logger.info(f"Estimated gamma_offset: {gamoff_guess:.4f}, omega_offset: {omoff_guess:.4f}")
             if params_guess['gamma_offset'] is None:
                 params_guess['gamma_offset'] = gamoff_guess
                 params_bounds['gamma_offset'] = (gamoff_guess+params_bounds['gamma_offset'][0], gamoff_guess+params_bounds['gamma_offset'][1]) # in case the guess for go is determined dynamically, the bounds are interpreted as relative to the guess
             if params_guess['omega_offset'] is None:
-                params_guess['omega_offset'] = omoff
-                params_bounds['omega_offset'] = (omoff+params_bounds['omega_offset'][0], omoff+params_bounds['omega_offset'][1]) 
+                params_guess['omega_offset'] = omoff_guess
+                params_bounds['omega_offset'] = (omoff_guess+params_bounds['omega_offset'][0], omoff_guess+params_bounds['omega_offset'][1]) 
         logger.info('Starting optimization')
         params_guess_list, bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, PARAMETER_MAP)
         pointing_b=spherical_to_cartesian(azi_b, elv_b)
