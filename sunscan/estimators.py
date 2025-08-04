@@ -1,31 +1,14 @@
 import numpy as np
 import scipy.optimize as opt
-from sunscan import sc_params, logger
-from sunscan.fit_utils import get_parameter_lists, optimize_brute_force, rmse
+from sunscan import logger
+from sunscan.fit_utils import get_parameter_lists, optimize_brute_force
 from sunscan.scanner import GeneralScanner, IdentityScanner
-from sunscan.math_utils import spherical_to_cartesian
+from sunscan.math_utils import spherical_to_cartesian, rmse, difference_angles
 from sunscan.utils import guess_offsets
+from sunscan.params import SCANNER_PARAMETER_MAP, sc_params
 
 
-PARAMETER_MAP = {
-    'gamma_offset': 0,
-    'omega_offset': 1,
-    'alpha': 2,
-    'delta': 3,
-    'beta': 4,
-    'epsilon': 5,
-}
 identity_scanner = IdentityScanner()
-
-def difference_angles(vec1, vec2):
-    """
-    Calculate the difference in angles between two vectors.
-    Returns the angle in radians.
-    """
-    dot_product = (vec1 * vec2).sum(axis=-1)
-    dot_product=np.clip(dot_product, -1.0, 1.0)
-    angle = np.arccos(dot_product)
-    return angle
 
 def forward_model(gamma, omega, params):
     """For a given set of parameters and azimuth/elevation angles, calculate the pointing direction of the radar.
@@ -57,7 +40,7 @@ def objective(params_dict, gamma, omega, target_vectors, return_vectors=False):
     return angles
 
 def optimize_function(params_list, gamma, omega, target_vectors):
-    params_dict= {k:params_list[v] for k,v in PARAMETER_MAP.items()}
+    params_dict= {k:params_list[v] for k,v in SCANNER_PARAMETER_MAP.items()}
     return rmse(objective(params_dict, gamma, omega, target_vectors))
 
 
@@ -92,7 +75,7 @@ class ScannerEstimator(object):
                 params_guess['omega_offset'] = omoff_guess
                 params_bounds['omega_offset'] = (omoff_guess+params_bounds['omega_offset'][0], omoff_guess+params_bounds['omega_offset'][1]) 
         logger.info('Starting optimization')
-        params_guess_list, bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, PARAMETER_MAP)
+        params_guess_list, bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SCANNER_PARAMETER_MAP)
         pointing_b=spherical_to_cartesian(azi_b, elv_b)
         optimize_args = (gamma, omega, pointing_b)
         #%%
@@ -114,7 +97,7 @@ class ScannerEstimator(object):
             bounds=bounds_list,
         )
         fit_result_list=opt_res.x
-        fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
+        fit_result_dict={k:fit_result_list[v] for k,v in SCANNER_PARAMETER_MAP.items()}
         logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {v:.4f}" for k, v in fit_result_dict.items()]))
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         logger.info(f"Initial objective: {init_rmse:.6f}")

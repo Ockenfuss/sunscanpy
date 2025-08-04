@@ -8,21 +8,13 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from scipy.signal import convolve2d
 
-from sunscan import logger, sc_params
-from sunscan.math_utils import spherical_to_xyz
+from sunscan import logger
+from sunscan.math_utils import spherical_to_xyz, rmse
 from sunscan.scanner import IdentityScanner, BacklashScanner
-from sunscan.fit_utils import get_parameter_lists, optimize_brute_force, rmse
+from sunscan.fit_utils import get_parameter_lists, optimize_brute_force
 from sunscan.utils import guess_offsets, format_input_xarray
+from sunscan.params import SUNSIM_PARAMETER_MAP, sc_params
 
-PARAMETER_MAP = {
-    "dgamma": 0,
-    "domega": 1,
-    "fwhm_x": 2,
-    "fwhm_y": 3,
-    "dtime": 4,
-    "backlash_gamma": 5,
-    "limb_darkening": 6
-}
 identity_scanner = IdentityScanner()
 
 
@@ -167,8 +159,8 @@ class SunSimulator(object):
         """Get the parameters of the simulator as a dictionary."""
         scanner_params = self.local_scanner.get_params()
         return {
-            "dgamma": scanner_params['dgamma'],
-            "domega": scanner_params['domega'],
+            "dgamma": scanner_params['gamma_offset'],
+            "domega": scanner_params['omega_offset'],
             "dtime": scanner_params['dtime'],
             "fwhm_x": self.fwhm_x,
             "fwhm_y": self.fwhm_y,
@@ -237,7 +229,7 @@ def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, l
     return sun_sim
         
 def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_norm, gammav, omegav, lut):
-    params_dict= {k: params_list[v] for k, v in PARAMETER_MAP.items()}
+    params_dict= {k: params_list[v] for k, v in SUNSIM_PARAMETER_MAP.items()}
     sun_sim = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut)
     error = sun_sim-signal_norm
     # se= (error**2).sum().item()
@@ -314,7 +306,7 @@ class SunSimulationEstimator(object):
             sun_elv= sun_elv.where(valid, drop=True)
         
         optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_norm_xr, gammav_xr, omegav_xr, self.lut)
-        params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, PARAMETER_MAP)
+        params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SUNSIM_PARAMETER_MAP)
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         if brute_force:
             logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(self.params_optimize)} total)")
@@ -334,7 +326,7 @@ class SunSimulationEstimator(object):
         # logger.info(f'RMSE: {res.fun:.3f}')
         # return res.x, res.fun  # params and rmse
         fit_result_list=opt_res.x
-        fit_result_dict={k:fit_result_list[v] for k,v in PARAMETER_MAP.items()}
+        fit_result_dict={k:fit_result_list[v] for k,v in SUNSIM_PARAMETER_MAP.items()}
         logger.info("Optimization Result:\n" + '\n'.join([f"{k}: {v:.4f}" for k, v in fit_result_dict.items()]))
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         logger.info(f"Initial objective: {init_rmse:.6f}")

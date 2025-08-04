@@ -18,13 +18,6 @@ def get_parameter_lists(parameters_optimize: list, parameter_guess: dict, parame
 
 
 
-def rmse(values):
-    """
-    Calculate the root mean square error (RMSE) between two sets of values.
-    """
-    return np.sqrt(np.mean(values ** 2))
-
-
 def optimize_brute_force(bounds, optimize_function, optimize_args, init_guess=None, points=3):
     steps=np.linspace(0, 1, points+2)[1:-1]  # Use a finer grid for brute force optimization
     # steps = np.linspace(0,1,8)

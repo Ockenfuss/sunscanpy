@@ -2,6 +2,23 @@
 import numpy as np
 import xarray as xr
 
+def rmse(values):
+    """
+    Calculate the root mean square error (RMSE) between two sets of values.
+    """
+    return np.sqrt(np.mean(values ** 2))
+
+def difference_angles(vec1, vec2):
+    """
+    Calculate the difference in angles between two vectors.
+    Returns the angle in radians.
+    """
+    dot_product = (vec1 * vec2).sum(axis=-1)
+    dot_product=np.clip(dot_product, -1.0, 1.0)
+    angle = np.arccos(dot_product)
+    return np.rad2deg(angle)
+
+
 
 def cartesian_to_spherical(unit_vectors):
     """Convert unit vectors to spherical coordinates (azimuth, elevation).

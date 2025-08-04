@@ -103,7 +103,7 @@ class TestBacklashScanner:
                             
                             # Apply inverse transformation
                             # for the backlash scanner, the forward-reverse transition is not exactly at omega=90 deg, but can be shifted
-                            reverse=(omega+scanner.domega+omegav*scanner.dtime)>90
+                            reverse=(omega+scanner.omega_offset+omegav*scanner.dtime)>90
                             gamma_result, omega_result = scanner.inverse(azi, elv, gammav, omegav, reverse=reverse)
                             
                             # Check that we get back the original values
@@ -114,7 +114,7 @@ class TestBacklashScanner:
     
     def test_backlash_scanner_array_inputs(self):
         """Test BacklashScanner with array inputs."""
-        scanner = BacklashScanner(dgamma=2, domega=1, dtime=0.1, backlash_gamma=1.0)
+        scanner = BacklashScanner(gamma_offset=2, omega_offset=1, dtime=0.1, backlash_gamma=1.0)
         
         # Array inputs
         gamma_array = np.array([0, 45, 90, 135])
@@ -134,7 +134,7 @@ class TestBacklashScanner:
     
     def test_backlash_scanner_edge_cases(self):
         """Test edge cases for BacklashScanner."""
-        scanner = BacklashScanner(dgamma=1, domega=0.5, dtime=0.05, backlash_gamma=0.5)
+        scanner = BacklashScanner(gamma_offset=1, omega_offset=0.5, dtime=0.05, backlash_gamma=0.5)
         
         # Test with zero velocities
         gamma, omega = 180, 45

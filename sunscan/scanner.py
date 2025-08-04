@@ -4,6 +4,7 @@ import ikpy
 from ikpy.chain import Chain
 from ikpy.link import OriginLink, URDFLink
 from sunscan.math_utils import spherical_to_cartesian
+from sunscan.params import SCANNER_PARAMETER_MAP
 
 
 
@@ -19,6 +20,13 @@ class Scanner(object):
     def inverse(self, azi, elv):
         """Inverse model: maps azimuth and elevation to scanner angles."""
         raise NotImplementedError("Please implement the inverse method in the subclass.")
+    
+    def get_params(self, complete=False):
+        """Get the parameters of the scanner as a dictionary.
+
+        If complete is True, return all parameters, otherwise only the ones that are actually used in this scanner model.
+        """
+        raise NotImplementedError("Please implement the get_params method in the subclass.")
 
 class IdentityScanner(Scanner):
     def forward(self, gamma, omega):
@@ -42,32 +50,46 @@ class IdentityScanner(Scanner):
         omega=xr.where(reverse, 180 - elv, elv)
         return gamma%360, omega
     
+    def get_params(self, complete=False):
+        params={}
+        if complete:
+            params['gamma_offset'] = 0.0
+            params['omega_offset'] = 0.0
+            params['alpha'] = 0.0
+            params['delta'] = 0.0
+            params['beta'] = 0.0
+            params['epsilon'] = 0.0
+            params['dtime'] = 0.0
+            params['backlash_gamma'] = 0.0
+        return params
+
+    
 class BacklashScanner(Scanner):
     """Identity Scanner model, but with global offsets and backlash correction.
     
        A time offset will be applied to both axes and create an angle offset depending on the speed of movement.
        A backlash correction is applied individually to the axes and only depends on the direction of movement.
     """
-    def __init__(self, dgamma, domega, dtime, backlash_gamma):
-        self.dgamma= dgamma
-        self.domega= domega
+    def __init__(self, gamma_offset, omega_offset, dtime, backlash_gamma):
+        self.gamma_offset= gamma_offset
+        self.omega_offset= omega_offset
         self.dtime= dtime
         self.backlash_gamma= backlash_gamma
         self.identity_scanner = IdentityScanner()
     
     def apply_offsets(self, gamma, omega, gammav, omegav):
-        gamma_corr = gamma+self.dgamma
+        gamma_corr = gamma+self.gamma_offset
         gamma_corr = gamma_corr+self.backlash_gamma*np.sign(gammav)
         gamma_corr = gamma_corr + self.dtime * gammav
-        omega_corr = omega+self.domega
+        omega_corr = omega+self.omega_offset
         omega_corr = omega_corr + self.dtime * omegav
         return np.round(gamma_corr, 12)%360, omega_corr
     
     def remove_offsets(self, gamma, omega, gammav, omegav):
-        gamma = gamma - self.dgamma
+        gamma = gamma - self.gamma_offset
         gamma = gamma - self.backlash_gamma * np.sign(gammav)
         gamma = gamma - self.dtime * gammav
-        omega = omega - self.domega
+        omega = omega - self.omega_offset
         omega = omega - self.dtime * omegav
         return np.round(gamma, 12)%360.0, omega
 
@@ -82,14 +104,20 @@ class BacklashScanner(Scanner):
         gamma, omega = self.remove_offsets(gamma, omega, gammav, omegav)
         return gamma, omega
     
-    def get_params(self):
+    def get_params(self, complete=False):
         """Get the parameters of the scanner as a dictionary."""
-        return {
-            'dgamma': self.dgamma,
-            'domega': self.domega,
+        params= {
+            'dgamma': self.gamma_offset,
+            'domega': self.omega_offset,
             'dtime': self.dtime,
             'backlash_gamma': self.backlash_gamma
         }
+        if complete:
+            params['alpha'] = 0.0
+            params['delta'] = 0.0
+            params['beta'] = 0.0
+            params['epsilon'] = 0.0
+        return params
 
 
 
@@ -181,7 +209,7 @@ class GeneralScanner(Scanner):
         self.delta = delta
         self.beta = beta
         self.epsilon = epsilon
-        self.backlash_scanner= BacklashScanner(dtime=dtime, backlash_gamma=backlash_gamma, dgamma=0, domega=0) #the constant offsets are handled by the chain
+        self.backlash_scanner= BacklashScanner(dtime=dtime, backlash_gamma=backlash_gamma, gamma_offset=0, omega_offset=0) #the constant offsets are handled by the chain
         self.chain = generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon)
     
     def forward_pointing(self, gamma, omega, gammav=0, omegav=0):
@@ -214,7 +242,7 @@ class GeneralScanner(Scanner):
     def inverse(self, azi, elv, gammav=0, omegav=0):
         azi= np.atleast_1d(azi)
         elv= np.atleast_1d(elv)
-        gamma, omega=[]
+        gamma, omega=[],[]
         for a,e in zip(azi, elv):
             # calculate the orientation vector
             unit_vector= spherical_to_cartesian(a,e)
@@ -227,7 +255,7 @@ class GeneralScanner(Scanner):
         gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav, omegav)
         return gamma, omega
     
-    def get_params(self):
+    def get_params(self, complete=False):
         """Get the parameters of the scanner as a dictionary."""
         backlash_params = self.backlash_scanner.get_params()
         return {
