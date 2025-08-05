@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.optimize as opt
-from sunscan import logger
+from sunscan.utils import logger
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force
 from sunscan.scanner import GeneralScanner, IdentityScanner
 from sunscan.math_utils import spherical_to_cartesian, rmse, difference_angles

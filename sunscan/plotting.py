@@ -85,6 +85,7 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     cax = fig.add_axes([0.2, 0.0, 0.7, 0.02])  # Adjust position and size of the colorbar
     fig.colorbar(im, cax=cax, orientation='horizontal', label='Normalized Signal Strength')
     params=simulator.get_params()
+    params['reverse'] = omega.mean()>90
     fig.suptitle(f"{starttime.strftime('%Y-%m-%d %H:%M')}\n"+"\n".join([f"{k}: {v:.4f}" for k, v in params.items()]), fontsize='small')
     ax.set_aspect('equal')
 

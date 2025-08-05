@@ -6,7 +6,7 @@ import pandas as pd
 from skyfield.api import load, N, S, E, W, wgs84
 from skyfield import almanac
 
-from pymira import logger
+from sunscan.utils import logger
 
 
 class SkyObject:
