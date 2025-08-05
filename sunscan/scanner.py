@@ -38,6 +38,9 @@ class IdentityScanner(Scanner):
         azi = xr.where(reverse, (gamma+180) , gamma)
         elv = xr.where(reverse, 180 - omega, omega)
         return azi%360, elv
+    
+    def forward_pointing(self, gamma, omega):
+        return spherical_to_cartesian(*self.forward(gamma, omega))
 
     def inverse(self, azi, elv, reverse=False):
         """Invert the identity radar model.
@@ -107,8 +110,8 @@ class BacklashScanner(Scanner):
     def get_params(self, complete=False):
         """Get the parameters of the scanner as a dictionary."""
         params= {
-            'dgamma': self.gamma_offset,
-            'domega': self.omega_offset,
+            'gamma_offset': self.gamma_offset,
+            'omega_offset': self.omega_offset,
             'dtime': self.dtime,
             'backlash_gamma': self.backlash_gamma
         }

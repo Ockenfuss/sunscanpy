@@ -277,6 +277,7 @@ class SunSimulationEstimator(object):
             gamma_max, omega_max = gamma[time_max], omega[time_max]
             sun_azi, sun_elv = self.sky.compute_sun_location(t=time[time_max])
             dgamma_guess, domega_guess = guess_offsets(gamma_max, omega_max, sun_azi, sun_elv)
+            logger.info(f"Estimated dgamma: {dgamma_guess:.4f}, domega: {domega_guess:.4f}")
             if params_guess['dgamma'] is None:
                 params_guess['dgamma'] = dgamma_guess
                 params_bounds['dgamma'] = (dgamma_guess+params_bounds['dgamma'][0], dgamma_guess+params_bounds['dgamma'][1]) # in case the guess for dgamma is determined dynamically, the bounds are interpreted as relative to the guess
