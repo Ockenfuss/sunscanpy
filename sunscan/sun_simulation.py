@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from scipy.signal import convolve2d
 
-from sunscan import logger
+from sunscan.utils import logger
 from sunscan.math_utils import spherical_to_xyz, rmse
 from sunscan.scanner import IdentityScanner, BacklashScanner
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force
@@ -145,13 +145,34 @@ def norm_signal(signal):
     """Normalize the signal to the range [0, 1]."""
     return (signal-signal.min())/(signal.max()-signal.min())
 
+def process_lut_argument(lut):
+    """Process the LUT argument to ensure it is an xarray DataArray."""
+    if lut is None:
+        lut=Path(sc_params['lutpath'])
+    if isinstance(lut, str):
+        lut= Path(lut)
+    if isinstance(lut, Path):
+        lutpath=lut
+        if lutpath.exists():
+            logger.info('Loading lookup table...')
+            lut = xr.open_dataarray(lutpath)
+        else:
+            lut = calculate_lut()
+            lutpath.parent.mkdir(parents=True, exist_ok=True)
+            lut.to_netcdf(lutpath)
+            logger.info("Lookup table calculated and saved to %s.", lutpath)
+    elif not isinstance(lut, xr.DataArray):
+        raise ValueError("lut must be an xarray DataArray, string, Pathlib.Path or None, got %s" % type(lut))
+    return lut
+
+
 
 class SunSimulator(object):
     def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut, sky=None):
+        self.lut = process_lut_argument(lut)
         self.fwhm_x = fwhm_x
         self.fwhm_y = fwhm_y
         self.limb_darkening = limb_darkening
-        self.lut = lut
         self.sky = sky
         self.local_scanner = BacklashScanner(dgamma, domega, dtime, backlash_gamma)
     
@@ -238,33 +259,29 @@ def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_norm, 
 
 class SunSimulationEstimator(object):
     def __init__(self, sky, params_optimize=None, params_guess=None, params_bounds=None, lut=None):
-        if lut is None:
-            lut=Path(sc_params['lutpath'])
-        if isinstance(lut, str):
-            lut= Path(lut)
-        if isinstance(lut, Path):
-            lutpath=lut
-            if lutpath.exists():
-                logger.info('Loading lookup table...')
-                lut = xr.open_dataarray(lutpath)
-            else:
-                lut = calculate_lut()
-                lutpath.parent.mkdir(parents=True, exist_ok=True)
-                lut.to_netcdf(lutpath)
-                logger.info("Lookup table calculated and saved to %s.", lutpath)
-        elif not isinstance(lut, xr.DataArray):
-            raise ValueError("lut must be an xarray DataArray, string, Pathlib.Path or None, got %s" % type(lut))
-        self.lut=lut
+        self.lut=process_lut_argument(lut)
         self.sky = sky
         if params_optimize is None:
-            params_optimize = sc_params['sunsim_params_optimize']
+            params_optimize = sc_params['sunsim_params_optimize'].copy()
         if params_guess is None:
-            params_guess = sc_params['sunsim_params_guess']
+            params_guess = {}
         if params_bounds is None:
-            params_bounds = sc_params['sunsim_params_bounds']
-        self.params_optimize = params_optimize.copy()
-        self.params_guess = params_guess.copy()
-        self.params_bounds = params_bounds.copy()
+            params_bounds = {}
+        # check that only valid parameters are provided
+        if not set(params_optimize).issubset(SUNSIM_PARAMETER_MAP.keys()):
+            raise ValueError(f"Invalid parameters to optimize: {params_optimize}. Valid parameters are: {SUNSIM_PARAMETER_MAP.keys()}")
+        if not set(params_guess.keys()).issubset(SUNSIM_PARAMETER_MAP.keys()):
+            raise ValueError(f"Invalid parameters to guess: {params_guess.keys()}. Valid parameters are: {SUNSIM_PARAMETER_MAP.keys()}")
+        if not set(params_bounds.keys()).issubset(SUNSIM_PARAMETER_MAP.keys()):
+            raise ValueError(f"Invalid parameters to bound: {params_bounds.keys()}. Valid parameters are: {SUNSIM_PARAMETER_MAP.keys()}")
+        # fill missing parameters with defaults
+        params_guess={**sc_params['sunsim_params_guess'], **params_guess}
+        params_bounds={**sc_params['sunsim_params_bounds'], **params_bounds}
+
+
+        self.params_optimize = params_optimize
+        self.params_guess = params_guess
+        self.params_bounds = params_bounds
     
     def fit(self, gamma, omega, time, signal, gammav, omegav, brute_force=True, brute_force_points=3):
         signal_norm = norm_signal(signal)
