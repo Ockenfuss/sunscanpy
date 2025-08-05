@@ -4,6 +4,7 @@ Sunscan - A Python module for performing and evaluating radar sun scans.
 import logging
 from .sky import SkyObject
 from .params import sc_params
+from .sun_simulation import SunSimulator, SunSimulationEstimator
 
 __version__ = "0.1.0"
 __author__ = "Paul Ockenfuss, Gregor Köcher"
@@ -14,11 +15,3 @@ __all__ = [
     "sc_params",
 ]
 
-# Create a logger for the module
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Set the logging level
-
-stream_handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-stream_handler.setFormatter(formatter)
-logger.addHandler(stream_handler)

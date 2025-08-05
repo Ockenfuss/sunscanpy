@@ -2,6 +2,7 @@
 import numpy as np
 import xarray as xr
 from sunscan.scanner import IdentityScanner
+import logging
 
 def guess_offsets(gamma, omega, azi_b, elv_b):
     reverse = omega > 90
@@ -30,3 +31,12 @@ def format_input_xarray(arr):
     else:
         raise ValueError(f'Input must be a 1D numpy array or xarray DataArray. Got {type(arr)} instead.')
 
+
+# Create a logger for the module
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Set the logging level
+
+stream_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - sunscan - %(levelname)s - %(message)s')
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
