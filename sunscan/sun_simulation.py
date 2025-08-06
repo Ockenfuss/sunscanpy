@@ -233,8 +233,21 @@ class SunSimulator(object):
     def forward(self, gamma, omega, time, gammav, omegav):
         sun_azi, sun_elv = self.sky.compute_sun_location(t=time)
         return self.forward_sun(gamma, omega, sun_azi, sun_elv, gammav=gammav, omegav=omegav)
-        
-    def get_calibrated_pair(self, time, reverse):
+    
+    def get_calibrated_pair(self, gamma, omega, time):
+        """Same as get_calibrated_pair_time, but takes gamma, omega and time as input.
+        The time for the calibrated pair is determined as the time of the middle sample in the time array.
+        """
+        gamma=np.atleast_1d(gamma)
+        omega=np.atleast_1d(omega)
+        time=np.atleast_1d(time)
+        index_middle=np.argsort(time)[len(time) // 2]
+        time_middle= time[index_middle]
+        omega_middle= omega[index_middle]
+        reverse= omega_middle > 90
+        return self.get_calibrated_pair_time(time_middle, reverse=reverse)
+            
+    def get_calibrated_pair_time(self, time, reverse):
         """Given a time, calculate the sun position at this time and the corresponding scanner angles.
         """
         #This function implements the "stationary assumption": We calculate a pair of scanner and celestial positions assuming gammav and omegav = 0. The scanner fit function will then do the same assumption.
