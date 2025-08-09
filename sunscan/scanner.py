@@ -14,7 +14,7 @@ class Scanner(object):
     def __init__(self):
         pass
     
-    def forward(self, gamma, omega):
+    def forward(self, gamma, omega, gammav, omegav):
         """Forward model: maps scanner angles to azimuth and elevation."""
         raise NotImplementedError("Please implement the forward method in the subclass.")
     def inverse(self, azi, elv):
@@ -29,7 +29,7 @@ class Scanner(object):
         raise NotImplementedError("Please implement the get_params method in the subclass.")
 
 class IdentityScanner(Scanner):
-    def forward(self, gamma, omega):
+    def forward(self, gamma, omega, gammav=None, omegav=None):
         """Identity scanner model M_I(gamma, omega) = (phi, theta)
         This model assumes a perfectly oriented scanner.
         For omega <=90 degrees, it is the identity function: gamma=phi, omega=theta.
@@ -39,7 +39,7 @@ class IdentityScanner(Scanner):
         elv = xr.where(reverse, 180 - omega, omega)
         return azi%360, elv
     
-    def forward_pointing(self, gamma, omega):
+    def forward_pointing(self, gamma, omega, gammav=None, omegav=None):
         return spherical_to_cartesian(*self.forward(gamma, omega))
 
     def inverse(self, azi, elv, reverse=False):
@@ -125,7 +125,7 @@ class BacklashScanner(Scanner):
 
 
 #%% 2D pan tilt system
-def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon):
+def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon, omega_bounds=None):
     d=1
     gamma_offset=np.deg2rad(gamma_offset)
     omega_offset=np.deg2rad(omega_offset)
@@ -133,6 +133,8 @@ def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon):
     delta=np.deg2rad(delta)
     beta=np.deg2rad(beta)
     epsilon=np.deg2rad(epsilon)
+    if omega_bounds is not None:
+        omega_bounds = (np.deg2rad(omega_bounds[0]), np.deg2rad(omega_bounds[1]))
     pt_chain= Chain(name='pan_tilt', links=[
         OriginLink(),
         URDFLink(
@@ -152,6 +154,7 @@ def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon):
             origin_translation=[0,0,d],
             origin_orientation=[beta,0,  0],
             rotation=[0, -1, 0],
+            bounds=omega_bounds
         ),
         URDFLink(
             name='elevation_offset',
@@ -241,21 +244,38 @@ class GeneralScanner(Scanner):
             elv_list.append(elv)
         return np.array(azi_list), np.array(elv_list)
     
+    def _create_bounded_chain_copy(self, omega_bounds):
+        chain=generate_pt_chain(self.gamma_offset, self.omega_offset, self.alpha, self.delta, self.beta, self.epsilon, omega_bounds=omega_bounds)
+        return chain
 
-    def inverse(self, azi, elv, gammav=0, omegav=0):
+    def inverse(self, azi, elv, gammav=0, omegav=0, reverse=None):
         azi= np.atleast_1d(azi)
         elv= np.atleast_1d(elv)
         gamma, omega=[],[]
+        if reverse is None:
+            chain = self.chain
+        elif reverse == False:
+            chain = self._create_bounded_chain_copy(omega_bounds=(-20,90))
+        elif reverse == True:
+            chain = self._create_bounded_chain_copy(omega_bounds=(90,200))
+        identity_scanner=IdentityScanner()
+        reverse_guess = False if reverse is None else reverse
         for a,e in zip(azi, elv):
             # calculate the orientation vector
-            unit_vector= spherical_to_cartesian(a,e)
-            initial_guess=_gam_om_to_joint_positions(a, e)
-            position=self.chain.inverse_kinematics(target_orientation=unit_vector, orientation_mode='Z', initial_position=initial_guess)
+            target_vector= spherical_to_cartesian(a,e)
+            gamma_guess, omega_guess = identity_scanner.inverse(a, e, reverse=reverse_guess)
+            initial_guess=_gam_om_to_joint_positions(gamma_guess, omega_guess)
+            position=chain.inverse_kinematics(target_orientation=target_vector, orientation_mode='Z', initial_position=initial_guess)
             g,o=_joint_positions_to_gam_om(position)
             gamma.append(g)
             omega.append(o)
         gamma, omega = np.array(gamma), np.array(omega)
         gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav, omegav)
+        # check the quality of the inversion
+        import warnings
+        azi_check, elv_check = self.forward(gamma, omega, gammav, omegav)
+        if not np.allclose(azi_check, azi, atol=0.1) or not np.allclose(elv_check, elv, atol=0.1):
+            warnings.warn(f"Inversion imperfect: Results deviate from target by up to {np.max(np.abs(azi_check-azi)):.2f} degrees in azimuth and {np.max(np.abs(elv_check-elv)):.2f} degrees in elevation.")
         return gamma, omega
     
     def get_params(self, complete=False):
