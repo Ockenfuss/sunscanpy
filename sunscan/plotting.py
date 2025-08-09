@@ -2,7 +2,8 @@ import xarray as xr
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import copy
+from sunscan.scanner import IdentityScanner, BacklashScanner
+from sunscan.math_utils import geometric_slerp, spherical_to_cartesian, cartesian_to_spherical
 
 from sunscan.sun_simulation import SunSimulator, norm_signal
 
@@ -107,3 +108,56 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     ax2.annotate('Simulation', xy=(0.5, 1.05), xycoords='axes fraction',
                        ha='center', va='center', fontsize=12, fontweight='bold')
     return fig, axs
+
+
+def _plot_fitting_points(ax, beam_azi, beam_elv, scanner_azi, scanner_elv, reverse, enhancement=1.0, plot_connectors=True):
+    extrapolated=[geometric_slerp(spherical_to_cartesian(beam_azi[i], beam_elv[i]), spherical_to_cartesian(scanner_azi[i], scanner_elv[i]), enhancement) for i in range(len(beam_azi))]
+    ext_azi, ext_elv=cartesian_to_spherical(np.array(extrapolated))
+
+    art1=ax.scatter(np.deg2rad(beam_azi), beam_elv, color='blue', marker='o', s=5)
+    # ax.scatter(identity_azi, identity_elv, color='red', marker='x', label='Position if identity model would be correct')
+    art2=ax.scatter(np.deg2rad(ext_azi[~reverse]), ext_elv[~reverse], color='green', marker='x')
+    art3=ax.scatter(np.deg2rad(ext_azi[reverse]), ext_elv[reverse], color='orange', marker='x')
+    if plot_connectors:
+        for i in range(len(beam_azi)):
+            ax.plot(np.deg2rad([beam_azi[i], ext_azi[i]]), [beam_elv[i], ext_elv[i]], color='grey', linewidth=0.5, linestyle='-')
+    ax.invert_yaxis()
+    ax.set_ylabel(r"$\theta$ [degrees]", rotation=45)
+    ax.yaxis.set_label_coords(0.6, 0.6)
+    ax.set_xlabel(r"$\phi$ [degrees]")
+    ax.set_ylim(90,0)
+    ax.set_theta_zero_location('N')
+    ax.set_theta_direction(-1)
+    return [art1, art2, art3]
+
+def plot_calibrated_pairs(gamma_s, omega_s, azi_beam, elv_beam, scanner_model=None, ax=None, gamma_offset=None, plot_connectors=None, enhancement=1.0):
+    if ax is None:
+        fig, _ax = plt.subplots(1, 1, subplot_kw={'polar': True}, figsize=(10,10))
+    else:
+        _ax = ax
+    if plot_connectors is None:
+        if gamma_offset is None and scanner_model is None:
+            plot_connectors = False
+        else:
+            plot_connectors = True
+    if scanner_model is None:
+        if gamma_offset is not None:
+            scanner_model=BacklashScanner(gamma_offset=gamma_offset, omega_offset=0.0, dtime=0.0, backlash_gamma=0.0)
+        else:
+            scanner_model = IdentityScanner()
+
+
+    reverse=omega_s>90
+    scanner_azi, scanner_elv= scanner_model.forward(gamma_s, omega_s, gammav=0, omegav=0)
+    artists=_plot_fitting_points(_ax, azi_beam, elv_beam, scanner_azi, scanner_elv, reverse, plot_connectors=plot_connectors, enhancement=enhancement)
+    artists[0].set_label('Reference Position from sunscan')
+    artists[1].set_label('Position if identity model would be correct (extrapolated)')
+    artists[2].set_label('Position for reverse scan (extrapolated)')
+    # _ax.set_title("")
+    # Create a single figure legend
+    handles, labels = _ax.get_legend_handles_labels()  # Get handles and labels from one of the axes
+    fig= _ax.get_figure()
+    fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 0.1), ncol=2)  # Adjust location and layout
+
+    if ax is None:
+        return fig, _ax
