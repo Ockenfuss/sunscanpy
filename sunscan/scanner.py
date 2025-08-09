@@ -242,7 +242,7 @@ class GeneralScanner(Scanner):
             azi, elv = _vector_to_azielv(z_axis, x_axis)
             azi_list.append(azi)
             elv_list.append(elv)
-        return np.array(azi_list), np.array(elv_list)
+        return np.array(azi_list)%360, np.array(elv_list)
     
     def _create_bounded_chain_copy(self, omega_bounds):
         chain=generate_pt_chain(self.gamma_offset, self.omega_offset, self.alpha, self.delta, self.beta, self.epsilon, omega_bounds=omega_bounds)
