@@ -150,9 +150,9 @@ def plot_calibrated_pairs(gamma_s, omega_s, azi_beam, elv_beam, scanner_model=No
     reverse=omega_s>90
     scanner_azi, scanner_elv= scanner_model.forward(gamma_s, omega_s, gammav=0, omegav=0)
     artists=_plot_fitting_points(_ax, azi_beam, elv_beam, scanner_azi, scanner_elv, reverse, plot_connectors=plot_connectors, enhancement=enhancement)
-    artists[0].set_label('Reference Position from sunscan')
-    artists[1].set_label('Position if identity model would be correct (extrapolated)')
-    artists[2].set_label('Position for reverse scan (extrapolated)')
+    artists[0].set_label(r'Reference celestial positions $\phi_{beam}$, $\theta_{beam}$')
+    artists[1].set_label(r'Pointing calculated from $\gamma_s$, $\omega_s$')
+    artists[2].set_label(r'Reverse samples (i.e. $\omega_s > 90^\circ$)')
     # _ax.set_title("")
     # Create a single figure legend
     handles, labels = _ax.get_legend_handles_labels()  # Get handles and labels from one of the axes

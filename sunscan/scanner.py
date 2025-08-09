@@ -3,8 +3,9 @@ import numpy as np
 import ikpy
 from ikpy.chain import Chain
 from ikpy.link import OriginLink, URDFLink
-from sunscan.math_utils import spherical_to_cartesian
+from sunscan.math_utils import spherical_to_cartesian, calc_azi_diff
 from sunscan.params import SCANNER_PARAMETER_MAP
+import warnings
 
 
 
@@ -232,6 +233,8 @@ class GeneralScanner(Scanner):
 
 
     def forward(self, gamma, omega, gammav=0, omegav=0):
+        gamma= np.atleast_1d(gamma)
+        omega= np.atleast_1d(omega)
         azi_list=[]
         elv_list=[]
         gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav, omegav)
@@ -242,7 +245,11 @@ class GeneralScanner(Scanner):
             azi, elv = _vector_to_azielv(z_axis, x_axis)
             azi_list.append(azi)
             elv_list.append(elv)
-        return np.array(azi_list)%360, np.array(elv_list)
+        if len(azi_list) > 1:
+            azi_list, elv_list = np.array(azi_list), np.array(elv_list)
+        else:
+            azi_list, elv_list = azi_list[0], elv_list[0]
+        return azi_list%360, elv_list
     
     def _create_bounded_chain_copy(self, omega_bounds):
         chain=generate_pt_chain(self.gamma_offset, self.omega_offset, self.alpha, self.delta, self.beta, self.epsilon, omega_bounds=omega_bounds)
@@ -269,12 +276,15 @@ class GeneralScanner(Scanner):
             g,o=_joint_positions_to_gam_om(position)
             gamma.append(g)
             omega.append(o)
-        gamma, omega = np.array(gamma), np.array(omega)
+        if len(gamma) >1:
+            gamma, omega = np.array(gamma), np.array(omega)
+        else:
+            gamma, omega = gamma[0], omega[0]
         gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav, omegav)
         # check the quality of the inversion
-        import warnings
         azi_check, elv_check = self.forward(gamma, omega, gammav, omegav)
-        if not np.allclose(azi_check, azi, atol=0.1) or not np.allclose(elv_check, elv, atol=0.1):
+        azi_diff= calc_azi_diff(azi_check, azi)
+        if not np.allclose(azi_diff, 0, atol=0.1) or not np.allclose(elv_check, elv, atol=0.1):
             warnings.warn(f"Inversion imperfect: Results deviate from target by up to {np.max(np.abs(azi_check-azi)):.2f} degrees in azimuth and {np.max(np.abs(elv_check-elv)):.2f} degrees in elevation.")
         return gamma, omega
     

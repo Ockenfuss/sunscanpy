@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from sunscan.scanner import IdentityScanner, BacklashScanner, GeneralScanner
+from sunscan.math_utils import calc_azi_diff
 
 
 class TestIdentityScanner:
@@ -151,11 +152,6 @@ class TestBacklashScanner:
         
         np.testing.assert_allclose(gamma_result, gamma, rtol=1e-10, atol=1e-10)
         np.testing.assert_allclose(omega_result, omega, rtol=1e-10, atol=1e-10)
-
-def azi_diff(azi1, azi2):
-    """Calculate the difference between two azimuth angles, considering wrap-around at 360 degrees."""
-    diff = (azi1 - azi2 + 180) % 360 - 180
-    return diff
 
 class TestGeneralScanner:
     @pytest.mark.parametrize("azi,elv", [

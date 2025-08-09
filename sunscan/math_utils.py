@@ -20,6 +20,11 @@ def difference_angles(vec1, vec2):
     angle = np.arccos(dot_product)
     return np.rad2deg(angle)
 
+def calc_azi_diff(azi1, azi2):
+    """Calculate the difference between two azimuth angles, considering wrap-around at 360 degrees."""
+    diff = (azi1 - azi2 + 180) % 360 - 180
+    return diff
+
 
 
 def cartesian_to_spherical(unit_vectors):
