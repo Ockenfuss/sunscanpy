@@ -28,6 +28,7 @@ dependencies = [
     "pandas",
     "scipy",
     "skyfield>=1.40",    
+    "ikpy"
 ]
 
 [project.optional-dependencies]
