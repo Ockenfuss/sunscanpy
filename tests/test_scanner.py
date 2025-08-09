@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from sunscan.scanner import IdentityScanner, BacklashScanner
+from sunscan.scanner import IdentityScanner, BacklashScanner, GeneralScanner
 
 
 class TestIdentityScanner:
@@ -76,10 +76,10 @@ class TestBacklashScanner:
         """Set up test fixtures."""
         # Test with various parameter combinations
         self.test_params = [
-            {'dgamma': 0, 'domega': 0, 'dtime': 0, 'backlash_gamma': 0},  # Identity case
-            {'dgamma': 5, 'domega': 2, 'dtime': 0.1, 'backlash_gamma': 1.5},  # Typical values
-            {'dgamma': -3, 'domega': -1, 'dtime': 0.05, 'backlash_gamma': 0.8},  # Negative offsets
-            {'dgamma': 10, 'domega': 5, 'dtime': 0.2, 'backlash_gamma': 2.0},  # Large values
+            {'gamma_offset': 0, 'omega_offset': 0, 'dtime': 0, 'backlash_gamma': 0},  # Identity case
+            {'gamma_offset': 5, 'omega_offset': 2, 'dtime': 0.1, 'backlash_gamma': 1.5},  # Typical values
+            {'gamma_offset': -3, 'omega_offset': -1, 'dtime': 0.05, 'backlash_gamma': 0.8},  # Negative offsets
+            {'gamma_offset': 10, 'omega_offset': 5, 'dtime': 0.2, 'backlash_gamma': 2.0},  # Large values
         ]
     
     def test_backlash_scanner(self):
@@ -151,3 +151,59 @@ class TestBacklashScanner:
         
         np.testing.assert_allclose(gamma_result, gamma, rtol=1e-10, atol=1e-10)
         np.testing.assert_allclose(omega_result, omega, rtol=1e-10, atol=1e-10)
+
+def azi_diff(azi1, azi2):
+    """Calculate the difference between two azimuth angles, considering wrap-around at 360 degrees."""
+    diff = (azi1 - azi2 + 180) % 360 - 180
+    return diff
+
+class TestGeneralScanner:
+    @pytest.mark.parametrize("azi,elv", [
+        (0, 30),
+        (90, 45),
+        (180, 60),
+        (270, 75),
+        (359, 10),
+        (180, 80),   # >75 deg, should trigger warning
+        (90, 89),    # >75 deg, should trigger warning
+    ])
+    @pytest.mark.parametrize("reverse", [True, False, None])
+    def test_inverse_accuracy(self, azi, elv, reverse):
+        epsilon = 15.0  # degrees tilt
+        scanner = GeneralScanner(
+            gamma_offset=0.0,
+            omega_offset=0.0,
+            alpha=0.0,
+            delta=0.0,
+            beta=0.0,
+            epsilon=epsilon,
+            dtime=0.0,
+            backlash_gamma=0.0
+        )
+        max_elv = 90 - epsilon
+        import warnings
+        # debug
+        # azi=0
+        # elv=30
+        # reverse=False
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            gamma, omega = scanner.inverse(azi, elv, gammav=0, omegav=0, reverse=reverse)
+            azi_check, elv_check = scanner.forward(gamma, omega, gammav=0, omegav=0)
+
+            if reverse is True:
+                assert omega >= 90, f"Expected omega >= 90 for reverse=True, got {omega}"
+            elif reverse is False:
+                assert omega <= 90, f"Expected omega < 90 for reverse=False, got {omega}"
+
+            if elv > max_elv:
+                # Should have raised a warning
+                assert any("Inversion imperfect" in str(warn.message) for warn in w), \
+                    f"Expected warning for elv={elv}, got none"
+                # Deviation should be target - max_elv
+                np.testing.assert_allclose(elv_check, max_elv, atol=0.2)
+                np.testing.assert_allclose(elv_check - elv, max_elv - elv, atol=0.2)
+            else:
+                # No warning expected, check closeness
+                np.testing.assert_allclose(azi_diff(azi_check, azi), 0, atol=0.2)
+                np.testing.assert_allclose(elv_check, elv, atol=0.2)
