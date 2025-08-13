@@ -60,11 +60,8 @@ class ScannerEstimator(object):
         self.dtime= dtime #dtime and backlash are not used in the estimation (assumption of stationary calibration pairs). They are only added after fitting, when the scanner is returned.
         self.backlash_gamma= backlash_gamma
     
-    def fit(self, gamma, omega, azi_b, elv_b, brute_force=True, brute_force_points=3):
-
+    def _fit(self, gamma, omega, azi_b, elv_b, params_optimize, params_guess, params_bounds, brute_force=True, brute_force_points=3):
         # gamma_offset and omega_offset can be None, in which case they are determined dynamically based on the mean difference between the scanner coordinates and beam position
-        params_guess = self.params_guess.copy()
-        params_bounds = self.params_bounds.copy()
         if params_guess['gamma_offset'] is None or params_guess['omega_offset'] is None:
             gamoff_guess, omoff_guess= guess_offsets(gamma, omega, azi_b, elv_b)
             logger.info(f"Estimated gamma_offset: {gamoff_guess:.4f}, omega_offset: {omoff_guess:.4f}")
@@ -72,13 +69,13 @@ class ScannerEstimator(object):
                 params_guess['gamma_offset'] = gamoff_guess
             if params_guess['omega_offset'] is None:
                 params_guess['omega_offset'] = omoff_guess
-        logger.info('Starting optimization')
-        params_guess_list, bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SCANNER_PARAMETER_MAP)
+        logger.info(f'Starting to optimize {", ".join(params_optimize)} using {len(gamma)} calibration pairs')
+        params_guess_list, bounds_list= get_parameter_lists(params_optimize, params_guess, params_bounds, SCANNER_PARAMETER_MAP)
         pointing_b=spherical_to_cartesian(azi_b, elv_b)
         optimize_args = (gamma, omega, pointing_b)
         #%%
         if brute_force:
-            logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(self.params_optimize)} total)")
+            logger.info(f"Brute force optimization enabled with {brute_force_points} points ({brute_force_points**len(params_optimize)} total)")
             brute_force_params, brute_force_rmse = optimize_brute_force(bounds_list, optimize_function, optimize_args=optimize_args, points=brute_force_points)
             logger.info(f"Best Parameters: " + ", ".join([f"{v:.4f}" for v in brute_force_params]))
             logger.info(f"Best RMSE: {brute_force_rmse:.6f}")
@@ -103,3 +100,77 @@ class ScannerEstimator(object):
         fitted_scanner= GeneralScanner(**fit_result_dict, dtime=self.dtime, backlash_gamma=self.backlash_gamma)
         return fitted_scanner, opt_res.fun
 
+    def fit_global(self, gamma, omega, azi_b, elv_b, brute_force=True, brute_force_points=3):
+        params_guess = self.params_guess.copy()
+        params_bounds = self.params_bounds.copy()
+        params_optimize = self.params_optimize.copy()
+        return self._fit(gamma, omega, azi_b, elv_b, params_optimize, params_guess, params_bounds, brute_force=brute_force, brute_force_points=brute_force_points)
+    
+    
+    def fit_sequential(self, gamma, omega, azi_b, elv_b, brute_force=True):
+        # Step 1: Fit gamma_offset and epsilon close to the horizon
+        is_horizon = np.logical_or(elv_b<20, elv_b>160)
+        if not np.any(is_horizon):
+            raise ValueError("No points close to the horizon found in the data. Sequential fitting not possible")
+        gamma_step1, omega_step1 = gamma[is_horizon], omega[is_horizon]
+        azi_b_step1, elv_b_step1 = azi_b[is_horizon], elv_b[is_horizon]
+        params_optimize_step1=['gamma_offset', 'epsilon']
+        params_guess_step1=self.params_guess.copy()
+        params_bounds_step1=self.params_bounds.copy()
+        logger.info(f"Step 1")
+        scanner_step1, rmse_step1 = self._fit(
+            gamma_step1, omega_step1, azi_b_step1, elv_b_step1,
+            params_optimize=params_optimize_step1,
+            params_guess=params_guess_step1,
+            params_bounds=params_bounds_step1,
+            brute_force=brute_force, brute_force_points=10
+        )
+        # Step 2: optimize omega_offset, alpha in the west / east
+        is_west_east = np.logical_or(np.abs(azi_b-270)<20, np.abs(azi_b-90)<20)
+        if not np.any(is_west_east):
+            raise ValueError("No points in the west/east found in the data. Sequential fitting not possible")
+        gamma_step2, omega_step2 = gamma[is_west_east], omega[is_west_east]
+        azi_b_step2, elv_b_step2 = azi_b[is_west_east], elv_b[is_west_east]
+        params_optimize_step2=['omega_offset', 'alpha']
+        params_guess_step2=scanner_step1.get_params()
+        params_bounds_step2=self.params_bounds.copy()
+        logger.info(f"Step 2")
+        scanner_step2, rmse_step2 = self._fit(
+            gamma_step2, omega_step2, azi_b_step2, elv_b_step2,
+            params_optimize=params_optimize_step2,
+            params_guess=params_guess_step2,
+            params_bounds=params_bounds_step2,
+            brute_force=brute_force, brute_force_points=10
+        )
+        # Step 3: Take points in the south high up in the sky to fit delta (causing an elevation offet) and beta (causing an azimuth (mostly) and elevation offset)
+        is_north_south = np.logical_or(np.abs(azi_b-180)<20, np.abs(azi_b-0)<20)
+        if not np.any(is_north_south):
+            raise ValueError("No points in the north/south found in the data. Sequential fitting not possible")
+        gamma_step3, omega_step3 = gamma[is_north_south], omega[is_north_south]
+        azi_b_step3, elv_b_step3 = azi_b[is_north_south], elv_b[is_north_south]
+        params_optimize_step3=['delta', 'beta']
+        params_guess_step3=scanner_step2.get_params()
+        params_bounds_step3=self.params_bounds.copy()
+        logger.info(f"Step 3")
+        scanner_step3, rmse_step3 = self._fit(
+            gamma_step3, omega_step3, azi_b_step3, elv_b_step3,
+            params_optimize=params_optimize_step3,
+            params_guess=params_guess_step3,
+            params_bounds=params_bounds_step3,
+            brute_force=brute_force, brute_force_points=10
+        )
+        # Final step 4: Fit all parameters again to the full sky
+        gamma_step4, omega_step4 = gamma, omega
+        azi_b_step4, elv_b_step4 = azi_b, elv_b
+        params_optimize_step4=self.params_optimize.copy()
+        params_guess_step4=scanner_step3.get_params()
+        params_bounds_step4=self.params_bounds.copy()
+        logger.info(f"Step 4")
+        scanner_step4, rmse_step4 = self._fit(
+            gamma_step4, omega_step4, azi_b_step4, elv_b_step4,
+            params_optimize=params_optimize_step4,
+            params_guess=params_guess_step4,
+            params_bounds=params_bounds_step4,
+            brute_force=False
+        )
+        return scanner_step4, rmse_step4

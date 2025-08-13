@@ -319,14 +319,14 @@ class GeneralScanner(Scanner):
     
     def __repr__(self):
         return "General Scanner Model:\n" + \
-               f"Azi Offset: {self.gamma_offset:.2f} º\n" + \
-               f"Elv Offset: {self.omega_offset:.2f} º\n" + \
-               f"Alpha: {self.alpha:.2f} º\n" + \
-               f"Delta: {self.delta:.2f} º\n" + \
-               f"Beta: {self.beta:.2f} º\n" + \
-               f"Epsilon: {self.epsilon:.2f} º\n" + \
-               f"Time Offset: {self.backlash_scanner.dtime:.2f} s\n" + \
-               f"Backlash: {self.backlash_scanner.backlash_gamma:.2f} º" + \
-               f"Flex: {self.backlash_scanner.flex:.2f} º at 0 elevation\n"
+               f"Azimuth Offset: {self.gamma_offset:.4f} º\n" + \
+               f"Elevation Offset: {self.omega_offset:.4f} º\n" + \
+               f"Alpha: {self.alpha:.4f} º\n" + \
+               f"Delta: {self.delta:.4f} º\n" + \
+               f"Beta: {self.beta:.4f} º\n" + \
+               f"Epsilon: {self.epsilon:.4f} º\n" + \
+               f"Time Offset: {self.backlash_scanner.dtime:.4f} s\n" + \
+               f"Azimuth Backlash: {self.backlash_scanner.backlash_gamma:.4f} º\n" + \
+               f"Flex: {self.backlash_scanner.flex:.4f} º at 0 elevation"
 
     
