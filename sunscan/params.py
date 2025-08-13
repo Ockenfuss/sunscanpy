@@ -13,6 +13,7 @@ SCANNER_PARAMETER_MAP = {
     'delta': 3,
     'beta': 4,
     'epsilon': 5,
+    'flex': 6
 }
 SUNSIM_PARAMETER_MAP = {
     "dgamma": 0,
@@ -57,7 +58,8 @@ sc_params={
         'alpha': 0.0,
         'delta': 0.0,
         'beta': 0.0,
-        'epsilon': 0.0
+        'epsilon': 0.0,
+        'flex': 0.0
     }, 
     "scanner_params_bounds": {
         'gamma_offset': (-5.0, 5.0),
@@ -65,6 +67,7 @@ sc_params={
         'alpha': (-1.0, 1.0),
         'delta': (-1.0, 1.0),
         'beta': (-0.1, 0.1),
-        'epsilon': (-2.0, 2.0)
+        'epsilon': (-2.0, 2.0),
+        'flex': (-0.1, 0.0)
     }
 }

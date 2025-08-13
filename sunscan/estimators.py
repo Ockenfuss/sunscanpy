@@ -70,10 +70,8 @@ class ScannerEstimator(object):
             logger.info(f"Estimated gamma_offset: {gamoff_guess:.4f}, omega_offset: {omoff_guess:.4f}")
             if params_guess['gamma_offset'] is None:
                 params_guess['gamma_offset'] = gamoff_guess
-                params_bounds['gamma_offset'] = (gamoff_guess+params_bounds['gamma_offset'][0], gamoff_guess+params_bounds['gamma_offset'][1]) # in case the guess for go is determined dynamically, the bounds are interpreted as relative to the guess
             if params_guess['omega_offset'] is None:
                 params_guess['omega_offset'] = omoff_guess
-                params_bounds['omega_offset'] = (omoff_guess+params_bounds['omega_offset'][0], omoff_guess+params_bounds['omega_offset'][1]) 
         logger.info('Starting optimization')
         params_guess_list, bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SCANNER_PARAMETER_MAP)
         pointing_b=spherical_to_cartesian(azi_b, elv_b)

@@ -58,7 +58,7 @@ class TestGuessOffsets:
         backlash_gamma = 0.0
         
         # Create scanner with known offsets
-        scanner = BacklashScanner(dgamma_true, domega_true, dtime, backlash_gamma)
+        scanner = BacklashScanner(dgamma_true, domega_true, dtime, backlash_gamma, flex=0)
         
         # Create velocity arrays (zero for these tests)
         gammav = np.zeros_like(gamma)
@@ -89,7 +89,7 @@ class TestGuessOffsets:
         backlash_gamma = 0.0
         
         # Create scanner with known offsets
-        scanner = BacklashScanner(dgamma_true, domega_true, dtime, backlash_gamma)
+        scanner = BacklashScanner(dgamma_true, domega_true, dtime, backlash_gamma, flex=0)
         
         # Create test data with values near 0/360 boundary
         gamma = np.array([350, 355, 0, 5, 10, 15, 20, 25])
@@ -121,7 +121,7 @@ class TestGuessOffsets:
         backlash_gamma = 0.0
         
         # Create scanner with known offsets
-        scanner = BacklashScanner(dgamma_true, domega_true, dtime, backlash_gamma)
+        scanner = BacklashScanner(dgamma_true, domega_true, dtime, backlash_gamma, flex=0)
         
         # Scalar test data
         gamma = 45.0

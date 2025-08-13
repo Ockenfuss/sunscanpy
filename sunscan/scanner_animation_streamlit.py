@@ -15,7 +15,8 @@ slider_defaults = {
     'gamma_offset': 0.0,
     'omega_offset': 0.0,
     'gamma': 0.0,
-    'omega': 90.0
+    'omega': 90.0,
+    'flex': 0.0
 }
 
 # Initialize session state for all sliders if not present
@@ -34,6 +35,7 @@ gamma_offset = st.sidebar.slider("Azimuth Offset (deg)", -30.0, 30.0, value=st.s
 beta = st.sidebar.slider("Beta (deg)", -30.0, 30.0, value=st.session_state['beta'], step=0.1, key='beta')
 omega_offset = st.sidebar.slider("Elevation Offset (deg)", -30.0, 30.0, value=st.session_state['omega_offset'], step=0.1, key='omega_offset')
 epsilon = st.sidebar.slider("Epsilon (deg)", -30.0, 30.0, value=st.session_state['epsilon'], step=0.1, key='epsilon')
+flex = st.sidebar.slider("Flex (deg at 0 elevation)", -30.0, 30.0, value=st.session_state['flex'], step=0.1, key='flex')
 
 st.sidebar.header("Joint Positions")
 gamma = st.sidebar.slider("Gamma ('Azimuth') (deg)", -180.0, 180.0, value=st.session_state['gamma'], step=0.1, key='gamma')
@@ -46,29 +48,28 @@ st.sidebar.radio(
     key='plot_frames'
 )
 
-# Convert degrees to radians
-gamma_rad = np.deg2rad(gamma)
-omega_rad = np.deg2rad(omega)
 
-scanner = GeneralScanner(gamma_offset=gamma_offset, omega_offset=omega_offset, alpha=alpha, delta=delta, beta=beta, epsilon=epsilon, dtime=0.0, backlash_gamma=0.0)
-positions = [0, gamma_rad, 0, omega_rad, 0, 0]
+scanner = GeneralScanner(gamma_offset=gamma_offset, omega_offset=omega_offset, alpha=alpha, delta=delta, beta=beta, epsilon=epsilon, dtime=0.0, backlash_gamma=0.0, flex=flex)
+positions = scanner._get_joint_positions(np.array([gamma]), np.array([omega]), gammav=0, omegav=0)
 
 fig = plt.figure(figsize=(7, 7))
 ax = fig.add_subplot(111, projection='3d')
 
 # Plot the chain
-scanner.chain.plot(positions, ax, plot_frames=st.session_state['plot_frames'])
+scanner.chain.plot(positions[0], ax)#, plot_frames=st.session_state['plot_frames'])
 ax.set_xlim([-2, 2])
 ax.set_ylim([-2, 2])
 ax.set_zlim([0, 4])
-ax.set_xlabel('X (m)')
-ax.set_ylabel('Y (m)')
+ax.set_xlabel('S <- X (m) -> N')
+ax.set_ylabel('W <- Y (m) -> E')
 ax.set_zlabel('Z (m)')
 ax.set_box_aspect([1, 1, 1])
 ax.set_title("Pan-Tilt Chain Visualization")
 
+ax.invert_yaxis()
+ax.view_init(elev=20, azim=-145)  # Rotate view to swap x/y appearance
 # Calculate pointing vector using forward_pt_chain
-x,y,z = scanner.forward_pointing(np.array([gamma]), np.array([omega]), gammav=0, omegav=0)[0]
+x,y,z = scanner.forward_pointing(np.array([gamma]), np.array([omega]), gammav=0, omegav=0)
 azi_deg, elv_deg = scanner.forward(np.array([gamma]), np.array([omega]), gammav=0, omegav=0)
 
 
@@ -76,6 +77,6 @@ azi_deg, elv_deg = scanner.forward(np.array([gamma]), np.array([omega]), gammav=
 
 st.header("Final Pointing Direction")
 st.markdown(f"**Cartesian:** x = {x:.3f}, y = {y:.3f}, z = {z:.3f}")
-st.markdown(f"**Spherical:** azimuth = {azi_deg[0]:.2f}°, elevation = {elv_deg[0]:.2f}°")
+st.markdown(f"**Spherical:** azimuth = {azi_deg:.2f}°, elevation = {elv_deg:.2f}°")
 
 st.pyplot(fig)

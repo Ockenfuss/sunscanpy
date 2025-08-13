@@ -174,7 +174,7 @@ class SunSimulator(object):
         self.fwhm_y = fwhm_y
         self.limb_darkening = limb_darkening
         self.sky = sky
-        self.local_scanner = BacklashScanner(dgamma, domega, dtime, backlash_gamma)
+        self.local_scanner = BacklashScanner(dgamma, domega, dtime, backlash_gamma, flex=0)
     
     def get_params(self):
         """Get the parameters of the simulator as a dictionary."""
@@ -310,10 +310,8 @@ class SunSimulationEstimator(object):
             logger.info(f"Estimated dgamma: {dgamma_guess:.4f}, domega: {domega_guess:.4f}")
             if params_guess['dgamma'] is None:
                 params_guess['dgamma'] = dgamma_guess
-                params_bounds['dgamma'] = (dgamma_guess+params_bounds['dgamma'][0], dgamma_guess+params_bounds['dgamma'][1]) # in case the guess for dgamma is determined dynamically, the bounds are interpreted as relative to the guess
             if params_guess['domega'] is None:
                 params_guess['domega'] = domega_guess
-                params_bounds['domega'] = (domega_guess+params_bounds['domega'][0], domega_guess+params_bounds['domega'][1]) 
 
         gamma_xr= xr.DataArray(gamma, dims='sample')
         omega_xr= xr.DataArray(omega, dims='sample')

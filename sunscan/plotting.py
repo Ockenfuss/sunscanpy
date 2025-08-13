@@ -142,7 +142,7 @@ def plot_calibrated_pairs(gamma_s, omega_s, azi_beam, elv_beam, scanner_model=No
             plot_connectors = True
     if scanner_model is None:
         if gamma_offset is not None:
-            scanner_model=BacklashScanner(gamma_offset=gamma_offset, omega_offset=0.0, dtime=0.0, backlash_gamma=0.0)
+            scanner_model=BacklashScanner(gamma_offset=gamma_offset, omega_offset=0.0, dtime=0.0, backlash_gamma=0.0, flex=0.0)
         else:
             scanner_model = IdentityScanner()
 
