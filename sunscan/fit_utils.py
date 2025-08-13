@@ -1,5 +1,6 @@
 import numpy as np
 from itertools import product
+from sunscan.params import SCANNER_PARAMETER_MAP
 
 
 def get_parameter_lists(parameters_optimize: list, parameter_guess: dict, parameter_bounds: dict, parameter_map: dict):
@@ -13,7 +14,7 @@ def get_parameter_lists(parameters_optimize: list, parameter_guess: dict, parame
         if par not in parameters_optimize:
             bounds_list[idx] = (parameter_guess[par], parameter_guess[par])  # Fix parameters not being optimized
         else:
-            bounds_list[idx] = (parameter_bounds[par][0], parameter_bounds[par][1])
+            bounds_list[idx] = (parameter_bounds[par][0]+parameter_guess[par], parameter_bounds[par][1]+parameter_guess[par])
     return init_guess_list, bounds_list
 
 
