@@ -77,10 +77,10 @@ class TestBacklashScanner:
         """Set up test fixtures."""
         # Test with various parameter combinations
         self.test_params = [
-            {'gamma_offset': 0, 'omega_offset': 0, 'dtime': 0, 'backlash_gamma': 0},  # Identity case
-            {'gamma_offset': 5, 'omega_offset': 2, 'dtime': 0.1, 'backlash_gamma': 1.5},  # Typical values
-            {'gamma_offset': -3, 'omega_offset': -1, 'dtime': 0.05, 'backlash_gamma': 0.8},  # Negative offsets
-            {'gamma_offset': 10, 'omega_offset': 5, 'dtime': 0.2, 'backlash_gamma': 2.0},  # Large values
+            {'gamma_offset': 0, 'omega_offset': 0, 'dtime': 0, 'backlash_gamma': 0, "flex": 0},  # Identity case
+            {'gamma_offset': 5, 'omega_offset': 2, 'dtime': 0.1, 'backlash_gamma': 1.5, "flex": 0},  # Typical values
+            {'gamma_offset': -3, 'omega_offset': -1, 'dtime': 0.05, 'backlash_gamma': 0.8, "flex": 0},  # Negative offsets
+            {'gamma_offset': 10, 'omega_offset': 5, 'dtime': 0.2, 'backlash_gamma': 2.0, "flex": 0},  # Large values
         ]
     
     def test_backlash_scanner(self):
@@ -115,7 +115,7 @@ class TestBacklashScanner:
     
     def test_backlash_scanner_array_inputs(self):
         """Test BacklashScanner with array inputs."""
-        scanner = BacklashScanner(gamma_offset=2, omega_offset=1, dtime=0.1, backlash_gamma=1.0)
+        scanner = BacklashScanner(gamma_offset=2, omega_offset=1, dtime=0.1, backlash_gamma=1.0, flex=0)
         
         # Array inputs
         gamma_array = np.array([0, 45, 90, 135])
@@ -135,7 +135,7 @@ class TestBacklashScanner:
     
     def test_backlash_scanner_edge_cases(self):
         """Test edge cases for BacklashScanner."""
-        scanner = BacklashScanner(gamma_offset=1, omega_offset=0.5, dtime=0.05, backlash_gamma=0.5)
+        scanner = BacklashScanner(gamma_offset=1, omega_offset=0.5, dtime=0.05, backlash_gamma=0.5, flex=0)
         
         # Test with zero velocities
         gamma, omega = 180, 45
@@ -174,7 +174,8 @@ class TestGeneralScanner:
             beta=0.0,
             epsilon=epsilon,
             dtime=0.0,
-            backlash_gamma=0.0
+            backlash_gamma=0.0,
+            flex=0.0
         )
         max_elv = 90 - epsilon
         import warnings
@@ -201,5 +202,96 @@ class TestGeneralScanner:
                 np.testing.assert_allclose(elv_check - elv, max_elv - elv, atol=0.2)
             else:
                 # No warning expected, check closeness
-                np.testing.assert_allclose(azi_diff(azi_check, azi), 0, atol=0.2)
+                np.testing.assert_allclose(calc_azi_diff(azi_check, azi), 0, atol=0.2)
                 np.testing.assert_allclose(elv_check, elv, atol=0.2)
+
+#%%
+        #%%
+class TestGeneralScannerForward:
+    def make_scanner(self, **params):
+        default_params={
+            'gamma_offset': 0.0,
+            'omega_offset': 0.0,
+            'alpha': 0.0,
+            'delta': 0.0,
+            'beta': 0.0,
+            'epsilon': 0.0,
+            'dtime': 0.0,
+            'backlash_gamma': 0.0,
+            'flex': 0.0
+        }
+        default_params.update(params)
+        return GeneralScanner(**default_params)
+    
+    @pytest.mark.parametrize("azi,elv,expected", [
+        (0, 0, np.array([1, 0, 0])),  # Azimuth 0, elevation 0 should point along +X
+        (0, 90, np.array([0, 0, 1])),  # Elevation 90° => pointing straight up
+        (90, 0, np.array([0, 1, 0])),  # Azimuth 90°, elevation 0 => point along +Y
+        (135, -45, np.array([-0.5, 0.5, -np.sqrt(2)/2])),  # Azimuth 135°, elevation -45°
+    ])
+    def test_pointing(self, azi, elv, expected):
+        """Test forward_pointing method with various azimuth and elevation combinations."""
+        scanner = self.make_scanner()
+        actual = scanner.forward_pointing(azi, elv)
+        np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+    def test_offset_applied(self):
+        # Apply azimuth offset of 90°, test direction changes from +X to +Y
+        scanner= self.make_scanner(gamma_offset=90)
+        azi, elv = 0, 0
+        expected = np.array([0, 1, 0])  # Should point along +Y
+        actual = scanner.forward_pointing(azi, elv)
+        np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+    def test_alpha_rotates_upward(self):
+        # alpha tilt around X should cause small positive Z-component at gamma=90, elv=0 (westward tilt)
+        scanner= self.make_scanner(alpha=10)
+        gamma, omega = 90,0
+        actual = scanner.forward_pointing(gamma, omega)
+        assert actual[2] > 0, "Expected upward tilt to create positive Z-component"
+        # if we point azimuth to 0, a tilt in alpha (i.e. around X) should not change anything
+        gamma, omega = 0,0
+        actual = scanner.forward_pointing(gamma, omega)
+        expected = np.array([1, 0, 0])  # Should still point along +X
+        np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+    def test_delta_rotates_upward(self):
+        # delta tilt around Y should cause small positive Z-component at gamma=180, elv=0 (northward tilt)
+        scanner = self.make_scanner(delta=10)
+        gamma, omega = 180, 0
+        actual = scanner.forward_pointing(gamma, omega)
+        assert actual[2] > 0, "Expected upward tilt to create positive Z-component"
+        # if we point azimuth to 90, a tilt in delta (i.e. around Y) should not change anything
+        gamma, omega = 90, 0
+        actual = scanner.forward_pointing(gamma, omega)
+        expected = np.array([0, 1, 0])  # Should still point along +Y
+        np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
+    def test_epsilon_upward_shift(self):
+        # antenna tilt epsilon should make the system point slightly off-Z at elv=90°
+        scanner = self.make_scanner(epsilon=2)
+        gamma, omega = 0, 90
+
+        result = scanner.forward_pointing(gamma, omega)
+
+        # z component should be almost 1
+        assert np.isclose(result[2], 1, atol=0.01), f"Expected Z-component close to 1, got {result[2]}"
+        # y component should be slightly negative
+        np.testing.assert_allclose(result[1], -np.sin(np.deg2rad(scanner.epsilon)), atol=1e-6)
+        # x component should be 0
+        np.testing.assert_allclose(result[0], 0, atol=1e-6)
+
+    def test_beta_upward_shift(self):
+        # gimbal tilt beta should make the system point slightly off-Z at elv=90°, exactly equal to epsilon
+        scanner = self.make_scanner(beta=2)
+        gamma, omega = 0, 90
+
+        result = scanner.forward_pointing(gamma, omega)
+        print(result)
+
+        # z component should be almost 1
+        assert np.isclose(result[2], 1, atol=0.01), f"Expected Z-component close to 1, got {result[2]}"
+        # y component should be slightly negative
+        np.testing.assert_allclose(result[1], -np.sin(np.deg2rad(scanner.beta)), atol=1e-6)
+        # x component should be 0
+        np.testing.assert_allclose(result[0], 0, atol=1e-6)
