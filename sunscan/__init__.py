@@ -13,5 +13,7 @@ __email__ = "paul.ockenfuss@physik.uni-muenchen.de"
 __all__ = [
     "SkyObject",
     "sc_params",
+    "SunSimulator",
+    "SunSimulationEstimator",
 ]
 
