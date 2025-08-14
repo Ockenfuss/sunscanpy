@@ -45,11 +45,11 @@ sc_params={
     "sunsim_params_bounds": {
         'dgamma': (-0.5, 0.5),
         'domega': (-0.5, 0.5),
-        'fwhm_x': (0.3, 0.9),
-        'fwhm_y': (0.3, 0.9),
+        'fwhm_x': (-0.3, 0.3),
+        'fwhm_y': (-0.3, 0.3),
         'dtime': (-1.0, 1.0),
         'backlash_gamma': (-0.2, 0.2),
-        'limb_darkening': (0.95, 1.0)
+        'limb_darkening': (-0.05, 0.00001)
     },
     "scanner_params_optimize": ['gamma_offset', 'omega_offset', 'alpha', 'delta', 'beta', 'epsilon'],
     "scanner_params_guess": {
