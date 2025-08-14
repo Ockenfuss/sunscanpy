@@ -20,7 +20,9 @@ def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax, vmin=0, vmax=1, cma
 
 def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_original, gammav, omegav, sky):
     sun_azi, sun_elv=sky.compute_sun_location(time)
-    signal_normed = norm_signal(signal_original)
+    # signal_normed = norm_signal(signal_original)
+    sky_db= signal_original.min()
+    sun_db= signal_original.max()
     starttime = pd.to_datetime(time.min())
     sun_sim= simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     params=simulator.get_params()
@@ -49,19 +51,19 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     
     ax = ax1
 
-    def plot_points_gammaomega(gamma, omega, c, ax):
-        im = ax.scatter(gamma, omega, c=c, cmap='turbo', s=13)
+    def plot_points_gammaomega(gamma, omega, c, ax, vmin, vmax):
+        im = ax.scatter(gamma, omega, c=c, cmap='turbo', s=13, vmin=vmin, vmax=vmax)
         ax.set_xlabel('Gamma ("Azimuth axis") [deg]')
         ax.set_ylabel('Omega ("Elevation axis") [deg]')
         return im
-    im = plot_points_gammaomega(gamma, omega, signal_original, ax)
+    im = plot_points_gammaomega(gamma, omega, signal_original, ax, vmin=sky_db, vmax=sun_db)
     fig.colorbar(im, ax=ax, label='Signal strength [dB]')
     ax = ax2
-    im = plot_points_gammaomega(gamma, omega, sun_sim, ax)
+    im = plot_points_gammaomega(gamma, omega, sun_sim, ax, vmin=sky_db, vmax=sun_db)
     # remove y tick labels
     ax.set_yticklabels([])
     ax.set_ylabel('')
-    fig.colorbar(im, ax=ax, label='Simulated signal [normalized]')
+    fig.colorbar(im, ax=ax, label='Simulated signal [dB]')
 
     # Plot measurements and simulation with the uncorrected tangent plane positions
     # simulator_noback = SunSimulator(dgamma=params['dgamma'], domega=params['domega'], fwhm_x=params['fwhm_x'], fwhm_y=params['fwhm_y'], limb_darkening=params['limb_darkening'], backlash_gamma=0.0, dtime=0.0, lut=simulator.lut, sky=simulator.sky)
@@ -76,23 +78,23 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     # ax.set_ylabel('')
 
     ax = ax5
-    diff=signal_normed-sun_sim
+    diff=signal_original-sun_sim
     im = _plot_points_tangent_plane(sun_pos_corrected, diff , ax, vmin=None, vmax=None, cmap='coolwarm')
-    fig.colorbar(im, ax=ax, label='Measured - Simulated [normalized]')
+    fig.colorbar(im, ax=ax, label='Measured - Simulated [dB]')
 
     ax = ax3
-    im = _plot_points_tangent_plane(sun_pos_corrected, signal_normed, ax)
+    im = _plot_points_tangent_plane(sun_pos_corrected, signal_original, ax, vmin=sky_db, vmax=sun_db)
     ax = ax4
     ax.pcolormesh(plane_full_x.values, plane_full_y.values, sim_full.values, cmap='turbo', alpha=0.2)
     ax.contour(plane_full_x.values, plane_full_y.values, sim_full.values, levels=[
                0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99], cmap='turbo', linewidths=1)
-    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim, ax)
+    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim, ax, vmin=sky_db, vmax=sun_db)
     ax.set_yticklabels([])
     ax.set_ylabel('')
 
     # Create a single colorbar for the lower row
     cax = fig.add_axes([0.2, 0.0, 0.7, 0.02])  # Adjust position and size of the colorbar
-    fig.colorbar(im, cax=cax, orientation='horizontal', label='Normalized Signal Strength')
+    fig.colorbar(im, cax=cax, orientation='horizontal', label='Signal Strength [dB]')
     reverse = omega.mean()>90
     fig.suptitle(f"{starttime.strftime('%Y-%m-%d %H:%M')}\n"+"\n".join([f"{k}: {v:.4f}" for k, v in params.items()])+f'\nreverse: {reverse}', fontsize='small')
     ax.set_aspect('equal')
