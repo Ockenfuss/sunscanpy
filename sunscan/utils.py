@@ -19,17 +19,24 @@ def guess_offsets(gamma, omega, azi_b, elv_b):
 def format_input_xarray(arr):
     if isinstance(arr, xr.DataArray):
         return arr
+    # numeric scalar → 1D DataArray of length 1
+    elif np.isscalar(arr) and np.issubdtype(np.asarray(arr).dtype, np.number) and not isinstance(arr, (bool, np.bool_)):
+        return xr.DataArray(np.asarray([arr]), dims='sample')
     elif isinstance(arr, np.ndarray):
         if arr.ndim != 1:
             raise ValueError('Input array must be 1D')
+        if not np.issubdtype(arr.dtype, np.number):
+            raise ValueError('Input array must be numeric')
         return xr.DataArray(arr, dims='sample')
     elif isinstance(arr, (list, tuple)):
-        arr = np.array(arr)
+        arr = np.asarray(arr)
         if arr.ndim != 1:
             raise ValueError('Input list or tuple must be 1D')
+        if not np.issubdtype(arr.dtype, np.number):
+            raise ValueError('Input list or tuple must be numeric')
         return xr.DataArray(arr, dims='sample')
     else:
-        raise ValueError(f'Input must be a 1D numpy array or xarray DataArray. Got {type(arr)} instead.')
+        raise ValueError(f'Input must be a 1D numeric array, list/tuple, or xarray DataArray. Got {type(arr)} instead.')
 
 
 # Create a logger for the module

@@ -31,7 +31,7 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     plane_full_y = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=1).min().item(),
                                 sun_pos_corrected.isel(row=1).max().item(), 100), dims='plane_y')
     plane_full_x, plane_full_y = xr.broadcast(plane_full_x, plane_full_y)
-    sim_full = simulator._lookup(xr.concat([plane_full_x, plane_full_y], dim='row'))
+    sim_full = simulator.lut.lookup(lx=plane_full_x, ly=plane_full_y, fwhm_x=simulator.fwhm_x, fwhm_y=simulator.fwhm_y, limb_darkening=simulator.limb_darkening)
 
     #
     fig = plt.figure(figsize=(8, 12))

@@ -63,6 +63,26 @@ class SkyObject:
         else:
             lon = lon * W
         return earth + wgs84.latlon(lat, lon, elevation_m=elevation)
+    
+    def convert_times(self, t):
+        """Convert various time formats to Skyfield times."""
+        if isinstance(t, str) and t == 'now':
+            times = [self.ts.now()]
+        elif isinstance(t, datetime):
+            times = [self.ts.utc(t.year, t.month, t.day, t.hour, t.minute, t.second)]
+        elif isinstance(t, np.datetime64):
+            # Handle single numpy datetime64
+            timestamp = pd.to_datetime(t)
+            times = [self.ts.utc(timestamp.year, timestamp.month, timestamp.day,
+                                 timestamp.hour, timestamp.minute, timestamp.second)]
+        elif (isinstance(t, np.ndarray) and np.issubdtype(t.dtype, np.datetime64)) or isinstance(t, list):
+            # Handle numpy array of datetime64 or list of datetime objects
+            time_series = pd.to_datetime(t)
+            times = [self.ts.utc(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second) 
+                    for dt in time_series.to_pydatetime()]
+        else:
+            raise ValueError('t must be a datetime object, list of datetime objects, numpy array, or "now"')
+        return times
 
     def compute_sun_location(self, t='now'):
         """Compute the position of the sun at a given time.
@@ -81,22 +101,7 @@ class SkyObject:
             tuple: The elevation and azimuth of the sun at the specified time(s) in degrees.
 
         """
-        if isinstance(t, str) and t == 'now':
-            times = [self.ts.now()]
-        elif isinstance(t, datetime):
-            times = [self.ts.utc(t.year, t.month, t.day, t.hour, t.minute, t.second)]
-        elif isinstance(t, np.datetime64):
-            # Handle single numpy datetime64
-            timestamp = pd.to_datetime(t)
-            times = [self.ts.utc(timestamp.year, timestamp.month, timestamp.day,
-                                 timestamp.hour, timestamp.minute, timestamp.second)]
-        elif (isinstance(t, np.ndarray) and np.issubdtype(t.dtype, np.datetime64)) or isinstance(t, list):
-            # Handle numpy array of datetime64 or list of datetime objects
-            time_series = pd.to_datetime(t)
-            times = [self.ts.utc(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second) 
-                    for dt in time_series.to_pydatetime()]
-        else:
-            raise ValueError('t must be a datetime object, list of datetime objects, numpy array, or "now"')
+        times= self.convert_times(t)
 
         sun_elvs, sun_azis = [], []
         for time in times:
@@ -178,6 +183,26 @@ class SkyObject:
         end = self.ts.utc(date.replace(hour=23, minute=59, second=59))
         times, _ = almanac.find_settings(self.location, self.sun, start, end)
         return times[0].utc_datetime()
+    
+    def get_sun_diameter(self, t='now'):
+        """Calculate the apparent diameter of the sun at a given time.
+
+        Returns:
+            float or list: The apparent diameter of the sun in degrees at the specified time(s).
+        """
+        sun_radius_km=695660 # solar radius according to https://en.wikipedia.org/wiki/Solar_radius (Haberreiter, Schmutz & Kosovichev (2008))
+        times= self.convert_times(t)
+
+        angles=[]
+        for time in times:
+            astrometric = self.location.at(time).observe(self.sun)
+            ra, dec, distance = astrometric.apparent().radec()
+            apparent_diameter = np.rad2deg(np.arcsin(sun_radius_km / distance.km) * 2.0)
+            angles.append(apparent_diameter)
+
+        if len(angles) == 1:
+            angles = angles[0]
+        return angles
     
     def __repr__(self):
         return f'SkyObject(location: '+str(self.location)+f'\nrefraction: {self.refraction}, humidity: {self.humidity})'

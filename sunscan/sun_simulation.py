@@ -16,160 +16,214 @@ from sunscan.utils import guess_offsets, format_input_xarray
 from sunscan.params import SUNSIM_PARAMETER_MAP, sc_params
 
 identity_scanner = IdentityScanner()
+LUT_VERSION='1.0'
 
+class LookupTable:
+    def __init__(self, dataarray, apparent_sun_diameter):
+        self.lut=dataarray
+        self.apparent_sun_diameter=apparent_sun_diameter
 
-def calculate_lut(dgamma_range=None, domega_range=None, resolution=401, fwhm_x=None, fwhm_y=None, limb_darkening=None):
-    if dgamma_range is None:
-        dgamma_range = sc_params['lut_dgamma_range']
-    if domega_range is None:
-        domega_range = sc_params['lut_domega_range']
-    if fwhm_x is None:
-        fwhm_x = sc_params['lut_fwhm_x']
-    if fwhm_y is None:
-        fwhm_y = sc_params['lut_fwhm_y']
-    if limb_darkening is None:
-        limb_darkening = sc_params['lut_limb_darkening']
+    @staticmethod
+    def _from_file(filepath):
+        da = xr.open_dataarray(filepath)
+        version= da.attrs.get('version', None)
+        return da, version
     
-    logger.info('Calculating new lookup table...')
-    s_to_l_conversion = 1  # this way, units in the tangent space are essentially in degrees
-    lookup_range_dl_gamma = dgamma_range*s_to_l_conversion
-    lookup_range_dl_omega = domega_range*s_to_l_conversion
-    lx = xr.DataArray(np.linspace(-lookup_range_dl_gamma, lookup_range_dl_gamma, resolution), dims='lx')
-    lx.coords['lx'] = lx
-    ly = xr.DataArray(np.linspace(-lookup_range_dl_omega, lookup_range_dl_omega, resolution), dims='ly')
-    ly.coords['ly'] = ly
-    # I found that non-zero centered luts can create an offset in contour plots
-    assert 0 in lx.values
-    assert 0 in ly.values
+    @classmethod
+    def from_file(cls, filepath, apparent_sun_diameter):
+        logger.info('Loading lookup table...')
+        da, version = cls._from_file(filepath)
+        if version!= LUT_VERSION:
+            logger.warning("Lookup table version mismatch: expected %s, got %s", LUT_VERSION, version)
+        return cls(da, apparent_sun_diameter)
 
-    limb_darkening = xr.DataArray(limb_darkening, dims='limb_darkening')
-    limb_darkening.coords['limb_darkening'] = limb_darkening
-    sun_rl = 0.5/2*s_to_l_conversion  # opening angle of the sun
-    sundist = np.sqrt(lx**2+ly**2)
-    sun = 1.0-(1.0-limb_darkening)*sundist/sun_rl
-    sun = xr.where(sundist < sun_rl, sun, np.nan)
-    sun = sun.dropna(dim='lx', how='all').dropna(dim='ly', how='all').fillna(0).rename(lx='sx', ly='sy')
-    # Gaussian beam
-    # FWHM = Full width half maximum
-    # FWHM = 2.355 * sigma
-    sigma_to_fwhm = 2*np.sqrt(2*np.log(2))
-    fwhm_x = xr.DataArray(fwhm_x, dims='fwhm_x')
-    fwhm_x.coords['fwhm_x'] = fwhm_x
-    sigma_x = fwhm_x*s_to_l_conversion/sigma_to_fwhm
-    fwhm_y = xr.DataArray(fwhm_y, dims='fwhm_y')
-    fwhm_y.coords['fwhm_y'] = fwhm_y
-    sigma_y = fwhm_y*s_to_l_conversion/sigma_to_fwhm
-    gaussian = np.exp(-lx**2/(2*sigma_x**2)-ly**2/(2*sigma_y**2))
-    # convolve sun and beam
-    def convolve_2d(arr, sun):
-        return convolve2d(arr, sun, mode='same', boundary='wrap')
-    lut = xr.apply_ufunc(convolve_2d, gaussian, sun, input_core_dims=[['lx', 'ly'], [
-                         'sx', 'sy']], output_core_dims=[['lx', 'ly']], vectorize=True)
-    # normalize
-    lut = (lut-lut.min(('lx', 'ly')))/(lut.max(('lx', 'ly'))-lut.min(('lx', 'ly')))
-    logger.info('Lookup table size: %.2f GB', lut.nbytes/1024**3)
-    return lut
+    @staticmethod
+    def calculate_new(dgamma_range=None, domega_range=None, resolution=401, fwhm_x=None, fwhm_y=None, limb_darkening=None):
+        if dgamma_range is None:
+            dgamma_range = sc_params['lut_dgamma_range']
+        if domega_range is None:
+            domega_range = sc_params['lut_domega_range']
+        if fwhm_x is None:
+            fwhm_x = sc_params['lut_fwhm_x']
+        if fwhm_y is None:
+            fwhm_y = sc_params['lut_fwhm_y']
+        if limb_darkening is None:
+            limb_darkening = sc_params['lut_limb_darkening']
+        
+        logger.info('Calculating new lookup table...')
+        # the input values are in degrees, but the lut is in units of the sun diameter
+        # to create the lookup table, we assume a sun diameter of 0.532 degrees, which is the yearly average in Germany
+        # This value is not too important, it only determines the range of the lookup table
+        apparent_sun_diameter = 0.532
+        lookup_range_x_su = dgamma_range/apparent_sun_diameter
+        lookup_range_y_su = domega_range/apparent_sun_diameter
+        lx = xr.DataArray(np.linspace(-lookup_range_x_su, lookup_range_x_su, resolution), dims='lx')
+        lx.coords['lx'] = lx
+        ly = xr.DataArray(np.linspace(-lookup_range_y_su, lookup_range_y_su, resolution), dims='ly')
+        ly.coords['ly'] = ly
+        # I found that non-zero centered luts can create an offset in contour plots
+        assert 0 in lx.values
+        assert 0 in ly.values
+
+        limb_darkening = xr.DataArray(limb_darkening, dims='limb_darkening')
+        limb_darkening.coords['limb_darkening'] = limb_darkening
+        sun_rl = 1/2  # radius of the sun in units of the sun diameter
+        sundist = np.sqrt(lx**2+ly**2)
+        sun = 1.0-(1.0-limb_darkening)*sundist/sun_rl
+        sun = xr.where(sundist < sun_rl, sun, np.nan)
+        sun = sun.dropna(dim='lx', how='all').dropna(dim='ly', how='all').fillna(0).rename(lx='sx', ly='sy')
+        # Gaussian beam
+        # FWHM = Full width half maximum
+        # FWHM = 2.355 * sigma
+        sigma_to_fwhm = 2*np.sqrt(2*np.log(2))
+        fwhm_x_su = xr.DataArray(fwhm_x, dims='fwhm_x')/apparent_sun_diameter
+        fwhm_x_su.coords['fwhm_x'] = fwhm_x
+        sigma_x_su = fwhm_x_su/sigma_to_fwhm
+        fwhm_y_su = xr.DataArray(fwhm_y, dims='fwhm_y')/apparent_sun_diameter
+        fwhm_y_su.coords['fwhm_y'] = fwhm_y
+        sigma_y_su = fwhm_y_su/sigma_to_fwhm
+        gaussian = np.exp(-lx**2/(2*sigma_x_su**2)-ly**2/(2*sigma_y_su**2))
+        # convolve sun and beam
+        def convolve_2d(arr, sun):
+            return convolve2d(arr, sun, mode='same', boundary='wrap')
+        lut = xr.apply_ufunc(convolve_2d, gaussian, sun, input_core_dims=[['lx', 'ly'], [
+                            'sx', 'sy']], output_core_dims=[['lx', 'ly']], vectorize=True)
+        # normalize
+        lut = (lut-lut.min(('lx', 'ly')))/(lut.max(('lx', 'ly'))-lut.min(('lx', 'ly')))
+        lut.lx.attrs['units'] = 'sun diameter'
+        lut.lx.attrs['description'] = 'Cross Elevation distance in beam centered coordinates'
+        lut.ly.attrs['units'] = 'sun diameter'
+        lut.ly.attrs['description'] = 'Co Elevation distance in beam centered coordinates'
+        lut.fwhm_x.attrs['units'] = 'degrees'
+        lut.fwhm_x.attrs['description'] = 'FWHM of the beam in cross elevation direction'
+        lut.fwhm_y.attrs['units'] = 'degrees'
+        lut.fwhm_y.attrs['description'] = 'FWHM of the beam in co elevation direction'
+        lut.attrs['version'] = LUT_VERSION
+        print(lut)
+        logger.info('Lookup table size: %.2f GB', lut.nbytes/1024**3)
+        return lut
+
+
+    def save(self, filepath):
+        self.lut.to_netcdf(filepath)
+
+    @classmethod
+    def load_or_create_if_necessary(cls, lutpath, apparent_sun_diameter):
+        """Process the LUT argument to ensure it is an xarray DataArray."""
+        if lutpath is None:
+            lutpath=Path(sc_params['lutpath'])
+        if isinstance(lutpath, str):
+            lutpath= Path(lutpath)
+        if isinstance(lutpath, Path):
+            lutpath=lutpath
+            if lutpath.exists():
+                logger.info("Loading lookup table from %s.", lutpath)
+                da, version= cls._from_file(lutpath)
+                if version != LUT_VERSION:
+                    logger.warning("Lookup table version mismatch: expected %s, got %s", LUT_VERSION, version)
+                    logger.info("Recalculating lookup table...")
+                    da= cls.calculate_new()
+                    lut= cls(da, apparent_sun_diameter)
+                    lut.save(lutpath)
+                    logger.info("Lookup table calculated and saved to %s.", lutpath)
+                    return lut
+                else:
+                    return cls(da, apparent_sun_diameter)
+            else:
+                logger.info("Calculating new lookup table...")
+                da = cls.calculate_new()
+                lut = cls(da, apparent_sun_diameter)
+                lutpath.parent.mkdir(parents=True, exist_ok=True)
+                lut.save(lutpath)
+                logger.info("Lookup table calculated and saved to %s.", lutpath)
+                return lut
+        else:
+            raise ValueError(f"lutpath must be either None, a string or a Path object. Received: {type(lutpath)}")
+    
+    def deg_to_su(self, deg):
+        """Convert an angle in degrees to an angles in units of the sun diameter"""
+        return deg / self.apparent_sun_diameter
+    
+    def su_to_deg(self, su):
+        """Convert an angle in units of the sun diameter to degrees"""
+        return su * self.apparent_sun_diameter
+
+    def _lookup_interp(self, **kwargs):
+        """Select scalar dimensions in the lookup table directly and interpolate the rest."""
+        sizes={k:self.lut.sizes[k] for k in kwargs.keys()}
+        len1=[k for k, v in sizes.items() if v == 1]
+        longer= [k for k, v in sizes.items() if v > 1]
+        lut=self.lut.sel(**{k: kwargs[k] for k in len1})
+        if len(longer) > 0:
+            lut = lut.interp(**{k: kwargs[k] for k in longer})
+        return lut
+
+    
+
+    def lookup(self, lx, ly, fwhm_x, fwhm_y, limb_darkening):
+        lx_su=self.deg_to_su(lx)
+        ly_su=self.deg_to_su(ly)
+        # sun_sim=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y, method='nearest')
+        # sun_sim = self.lut.interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(
+        #     row=1), fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
+        sun_sim= self._lookup_interp(lx=lx_su, ly=ly_su, fwhm_x=fwhm_x, fwhm_y=fwhm_y, limb_darkening=limb_darkening)
+        # sun_sim=lut.isel(limb_darkening=-1).interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y)
+        # sun_sim=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), method='nearest').interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
+        # sun_sim=lut.interp(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1)).interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
+        return sun_sim
+    
+    def check_within_lut(self, px, py):
+        px_su= self.deg_to_su(px)
+        py_su= self.deg_to_su(py)
+        lxmin, lxmax = self.lut.lx.min().item(), self.lut.lx.max().item()
+        lymin, lymax = self.lut.ly.min().item(), self.lut.ly.max().item()
+        valid = (px > lxmin) & (px < lxmax) & (py > lymin) & (py < lymax)
+        return valid
 
 
 
-# def _cart_to_tangential_matrix(anchor_azi, anchor_elv):
-#     """Matrix to convert from cartesian coordinates to cartesian coordinates in the tangential plane, 
-#     anchored at the given position on the unit sphere."""
-#     anchor_phi, anchor_theta = _azi_elv_to_theta_phi(np.deg2rad(anchor_azi), np.deg2rad(anchor_elv))
-#     loc_ze = xr.concat(_phitheta_to_cartesian(anchor_phi, anchor_theta), dim='row')
-#     # y: co-elevation axis
-#     anc_theta_y = np.pi/2-anchor_theta
-#     anc_phi_y = (anchor_phi+np.pi) % (2*np.pi)
-#     loc_ye = xr.concat(_phitheta_to_cartesian(anc_phi_y, anc_theta_y), dim='row')
-#     # x: cross-elevation axis
-#     anc_phi_x = (anchor_phi-np.pi/2) % (2*np.pi)
-#     anc_theta_x = 0*anchor_theta+np.pi/2
-#     loc_xe = xr.concat(_phitheta_to_cartesian(anc_phi_x, anc_theta_x), dim='row')
-
-#     conv_loc_to_cart = xr.concat([loc_xe, loc_ye, loc_ze], dim='col')
-#     # invert
-#     conv_cart_to_loc = xr.apply_ufunc(np.linalg.inv, conv_loc_to_cart, input_core_dims=[
-#                                       ['col', 'row']], output_core_dims=[['col', 'row']])
-#     return conv_cart_to_loc
-
-def _cart_to_tangential_matrix(anchor_azi, anchor_elv):
+def get_beamcentered_unitvectors(azi_beam, elv_beam):
     """Matrix to convert from cartesian world coordinates to cartesian coordinates in the tangential plane, 
     anchored at the given position on the unit sphere."""
-    anchor_azi = format_input_xarray(anchor_azi)
-    anchor_elv = format_input_xarray(anchor_elv)
-    loc_ze = xr.concat(spherical_to_xyz(anchor_azi, anchor_elv), dim='row')
-    world_ze= xr.zeros_like(loc_ze)
+    azi_beam = format_input_xarray(azi_beam)
+    elv_beam = format_input_xarray(elv_beam)
+    bz = xr.concat(spherical_to_xyz(azi_beam, elv_beam), dim='row')
+    world_ze= xr.zeros_like(bz)
     world_ze[{'row': 2}] = 1.0
     # x: cross-elevation axis
-    loc_xe=xr.cross(world_ze, loc_ze, dim='row')
+    bx=xr.cross(world_ze, bz, dim='row')
     # normalize
-    loc_xe = loc_xe / xr.apply_ufunc(np.linalg.norm, loc_xe, input_core_dims=[['row']], kwargs={'axis': -1})
+    bx = bx / xr.apply_ufunc(np.linalg.norm, bx, input_core_dims=[['row']], kwargs={'axis': -1})
     # y: co-elevation axis
-    loc_ye=xr.cross(loc_ze, loc_xe, dim='row')
+    by=xr.cross(bz, bx, dim='row')
+    return bx, by, bz
+
+def get_world_to_beam_matrix(azi_beam, elv_beam):
     # stacking those vectors in columns would give the local to world transformation matrix
     # stacking them in rows gives the world to local transformation matrix
     # therefore, we need to transpose the matrix. This can be done by renaming row to col for each vector
-    world_to_local=xr.concat([l.rename(row='col') for l in [loc_xe, loc_ye, loc_ze]], dim='row')
-    return world_to_local
+    bx, by, bz = get_beamcentered_unitvectors(azi_beam, elv_beam)
+    world_to_beam=xr.concat([l.rename(row='col') for l in [bx, by, bz]], dim='row')
+    return world_to_beam
 
-def _get_tangential_coords(anchor_azi, anchor_elv, data_azi, data_elv):
-    data_azi = format_input_xarray(data_azi)
-    data_elv = format_input_xarray(data_elv)
-    conv_cart_to_loc = _cart_to_tangential_matrix(anchor_azi, anchor_elv)
+def get_beamcentered_coords(azi_beam, elv_beam, azi_sun, elv_sun):
+    azi_sun = format_input_xarray(azi_sun)
+    elv_sun = format_input_xarray(elv_sun)
     # phi_sun, theta_sun = _azi_elv_to_theta_phi(data_azi), data_elv))
     sun_distance = 360/(2*np.pi)  # this way, 1deg sun offset is roughly 1 unit in the local coordinate system
     # sun_positions = xr.concat(_phitheta_to_cartesian(phi_sun, theta_sun, sun_distance), dim='col')
-    positions = sun_distance* xr.concat(spherical_to_xyz(data_azi, data_elv), dim='col')
-    sun_pos_local = (conv_cart_to_loc*positions).sum(dim='col')
-    return sun_pos_local
-
-
-
-# Test: radar always in one fixed position, sun moves around
-# test_elv_radar=xr.DataArray([0], dims='test')
-# test_azi_radar=xr.DataArray([0], dims='test')
-# test_elv_sun=xr.DataArray(np.arange(-2,2, 0.5), dims='test_x')
-# test_elv_sun=test_elv_radar+test_elv_sun
-# test_azi_sun=xr.DataArray(np.arange(-2, 2, 0.5), dims='test_y')
-# test_elv_radar, test_azi_radar, test_elv_sun, test_azi_sun=xr.broadcast(test_elv_radar, test_azi_radar, test_elv_sun, test_azi_sun)
-# test_elv_radar=test_elv_radar.stack(sample=['test', 'test_x', 'test_y']).drop_vars(['test', 'test_x', 'test_y'])
-# test_azi_radar=test_azi_radar.stack(sample=['test', 'test_x', 'test_y']).drop_vars(['test', 'test_x', 'test_y'])
-# test_elv_sun=test_elv_sun.stack(sample=['test', 'test_x', 'test_y']).drop_vars(['test', 'test_x', 'test_y'])
-# test_azi_sun=test_azi_sun.stack(sample=['test', 'test_x', 'test_y']).drop_vars(['test', 'test_x', 'test_y'])
-# test_sun_pos_local=get_sunpos_local(test_elv_radar, test_azi_radar, test_elv_sun, test_azi_sun, 0, 0)
-# fig, ax=plt.subplots(figsize=(10,10))
-# ax.scatter(test_sun_pos_local.sel(row=0).values, test_sun_pos_local.sel(row=1).values)
-
+    positions = sun_distance* xr.concat(spherical_to_xyz(azi_sun, elv_sun), dim='col')
+    world_to_beam= get_world_to_beam_matrix(azi_beam, elv_beam)
+    sun_pos_beam = (world_to_beam*positions).sum(dim='col')
+    return sun_pos_beam
 
 def norm_signal(signal):
     """Normalize the signal to the range [0, 1]."""
     return (signal-signal.min())/(signal.max()-signal.min())
 
-def process_lut_argument(lut):
-    """Process the LUT argument to ensure it is an xarray DataArray."""
-    if lut is None:
-        lut=Path(sc_params['lutpath'])
-    if isinstance(lut, str):
-        lut= Path(lut)
-    if isinstance(lut, Path):
-        lutpath=lut
-        if lutpath.exists():
-            logger.info('Loading lookup table...')
-            lut = xr.open_dataarray(lutpath)
-        else:
-            lut = calculate_lut()
-            lutpath.parent.mkdir(parents=True, exist_ok=True)
-            lut.to_netcdf(lutpath)
-            logger.info("Lookup table calculated and saved to %s.", lutpath)
-    elif not isinstance(lut, xr.DataArray):
-        raise ValueError("lut must be an xarray DataArray, string, Pathlib.Path or None, got %s" % type(lut))
-    return lut
-
-
-
 class SunSimulator(object):
-    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut, sky=None):
-        self.lut = process_lut_argument(lut)
+    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut: LookupTable, sky=None):
+        self.lut = lut
         self.fwhm_x = fwhm_x
         self.fwhm_y = fwhm_y
         self.limb_darkening = limb_darkening
@@ -189,45 +243,23 @@ class SunSimulator(object):
             "limb_darkening": self.limb_darkening
         }
 
-    def _lookup_interp(self, **kwargs):
-        """Select scalar dimensions in the lookup table directly and interpolate the rest."""
-        sizes={k:self.lut.sizes[k] for k in kwargs.keys()}
-        len1=[k for k, v in sizes.items() if v == 1]
-        longer= [k for k, v in sizes.items() if v > 1]
-        lut=self.lut.sel(**{k: kwargs[k] for k in len1})
-        if len(longer) > 0:
-            lut = lut.interp(**{k: kwargs[k] for k in longer})
-        return lut
-
-    def _lookup(self, tangential_coordinates):
-        # sun_sim=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y, method='nearest')
-        # sun_sim = self.lut.interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(
-        #     row=1), fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
-        sun_sim= self._lookup_interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(row=1), fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
-        # sun_sim=lut.isel(limb_darkening=-1).interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y)
-        # sun_sim=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), method='nearest').interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
-        # sun_sim=lut.interp(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1)).interp(fwhm_x=fwhm_x, fwhm_y=fwhm_y)
-        return sun_sim
-    
     def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
         beam_azi, beam_elv = self.local_scanner.forward(gamma, omega, gammav=gammav, omegav=omegav)
-        sunpos_tangential = _get_tangential_coords(beam_azi, beam_elv, sun_azi, sun_elv)
+        sunpos_tangential = get_beamcentered_coords(beam_azi, beam_elv, sun_azi, sun_elv)
         return sunpos_tangential
 
     def check_within_lut(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
         sun_pos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav=gammav, omegav=omegav)
-        lxmin, lxmax = self.lut.lx.min().item(), self.lut.lx.max().item()
-        lymin, lymax = self.lut.ly.min().item(), self.lut.ly.max().item()
-        valid = (sun_pos_tangential.sel(row=0) > lxmin) & (sun_pos_tangential.sel(row=0) < lxmax) & (
-            sun_pos_tangential.sel(row=1) > lymin) & (sun_pos_tangential.sel(row=1) < lymax)
+        valid=self.lut.check_within_lut(sun_pos_tangential.sel(row=0), sun_pos_tangential.sel(row=1))
         return valid
     
     def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
         # get the tangential coordinates of the sun position
-        # Since we are not using the time in the simulation, it is possible to calcualte the sun positions only once externally and save the expensive calculation in the fit every time.
+        # Since we are not using the time in the simulation, it is possible to calculate the sun positions only once externally and save the expensive calculation in the fit every time.
         # Therefore, this version of forward exists, which takes the sun position as input.
         sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
-        sun_sim = self._lookup(sunpos_tangential)
+        lx, ly=sunpos_tangential.sel(row=0), sunpos_tangential.sel(row=1)
+        sun_sim = self.lut.lookup(lx=lx, ly=ly, fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
         return sun_sim
     
     def forward(self, gamma, omega, time, gammav, omegav):
@@ -271,8 +303,8 @@ def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_norm, 
 
 
 class SunSimulationEstimator(object):
-    def __init__(self, sky, params_optimize=None, params_guess=None, params_bounds=None, lut=None):
-        self.lut=process_lut_argument(lut)
+    def __init__(self, sky, params_optimize=None, params_guess=None, params_bounds=None, lutpath=None):
+        self.lutpath=lutpath
         self.sky = sky
         if params_optimize is None:
             params_optimize = sc_params['sunsim_params_optimize'].copy()
@@ -299,6 +331,10 @@ class SunSimulationEstimator(object):
     def fit(self, gamma, omega, time, signal, gammav, omegav, brute_force=True, brute_force_points=3):
         signal_norm = norm_signal(signal)
         time_max = signal_norm.argmax()
+        apparent_sun_diameter = 1.2*self.sky.get_sun_diameter(t=time[time_max])
+        print("warning: making the sun larger!")
+        print(f"Using apparent sun diameter of {apparent_sun_diameter:.2f} degrees.")
+        lut=LookupTable.load_or_create_if_necessary(self.lutpath, apparent_sun_diameter)
 
         # dgamma and domega can be None, in which case they are determined dynamically based on the scanner and sun position at the time of maximum signal
         params_guess = self.params_guess.copy()
@@ -321,7 +357,7 @@ class SunSimulationEstimator(object):
         omegav_xr= xr.DataArray(omegav, dims='sample')
         sun_azi, sun_elv = xr.apply_ufunc(self.sky.compute_sun_location, time_xr, output_core_dims=[[],[]])
         # check that with the initial guess, the relative difference between sun and scanner is within the lookup table
-        init_simulator= SunSimulator(**params_guess, lut=self.lut)
+        init_simulator= SunSimulator(**params_guess, lut=lut)
         valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv, gammav_xr, omegav_xr)
         if not valid.all():
             logger.warning(f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
@@ -334,7 +370,7 @@ class SunSimulationEstimator(object):
             sun_azi= sun_azi.where(valid, drop=True)
             sun_elv= sun_elv.where(valid, drop=True)
         
-        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_norm_xr, gammav_xr, omegav_xr, self.lut)
+        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_norm_xr, gammav_xr, omegav_xr, lut)
         params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SUNSIM_PARAMETER_MAP)
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         if brute_force:
@@ -360,7 +396,7 @@ class SunSimulationEstimator(object):
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         logger.info(f"Initial objective: {init_rmse:.6f}")
         logger.info(f"Optimal objective: {opt_res.fun:.6f}")
-        fitted_simulator= SunSimulator(**fit_result_dict, lut=self.lut, sky=self.sky)
+        fitted_simulator= SunSimulator(**fit_result_dict, lut=lut, sky=self.sky)
         return fitted_simulator, opt_res.fun
 
 
