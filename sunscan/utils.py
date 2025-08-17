@@ -38,6 +38,14 @@ def format_input_xarray(arr):
     else:
         raise ValueError(f'Input must be a 1D numeric array, list/tuple, or xarray DataArray. Got {type(arr)} instead.')
 
+def db_to_linear(signal_db):
+    """Convert a signal in dB to linear scale."""
+    return 10**(signal_db/10)
+
+def linear_to_db(signal_linear):
+    """Convert a signal in linear scale to dB."""
+    return 10 * np.log10(signal_linear)
+
 
 # Create a logger for the module
 logger = logging.getLogger(__name__)

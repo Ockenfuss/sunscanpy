@@ -21,8 +21,6 @@ def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax, vmin=0, vmax=1, cma
 def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_original, gammav, omegav, sky):
     sun_azi, sun_elv=sky.compute_sun_location(time)
     # signal_normed = norm_signal(signal_original)
-    sky_db= signal_original.min()
-    sun_db= signal_original.max()
     starttime = pd.to_datetime(time.min())
     sun_sim= simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     params=simulator.get_params()
@@ -33,21 +31,38 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     plane_full_y = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=1).min().item(),
                                 sun_pos_corrected.isel(row=1).max().item(), 100), dims='plane_y')
     plane_full_x, plane_full_y = xr.broadcast(plane_full_x, plane_full_y)
-    sim_full = simulator.lut.lookup(lx=plane_full_x, ly=plane_full_y, fwhm_x=simulator.fwhm_x, fwhm_y=simulator.fwhm_y, limb_darkening=simulator.limb_darkening)
+    # sun_contribution = simulator.lut.lookup(lx=plane_full_x, ly=plane_full_y, fwhm_x=simulator.fwhm_x, fwhm_y=simulator.fwhm_y, limb_darkening=simulator.limb_darkening)
+    # sun_sim_linear= db_to_linear(self.sky_db)*(1-sun_contribution) + db_to_linear(self.sun_db)*sun_contribution
+    # sun_sim_db= linear_to_db(sun_sim_linear)
+    sim_full = simulator.signal_from_bc_coords(plane_full_x, plane_full_y)
 
     #
-    fig = plt.figure(figsize=(8, 12))
+    fig = plt.figure(figsize=(8, 12), layout='tight')
     
-    # Create grid: 3 rows x 4 columns for better control
-    # Row 1: columns 0-1 and 2-3 (2 plots)
-    # Row 2: columns 0-1 and 2-3 (2 plots) 
-    # Row 3: columns 1-2 (1 centered plot)
-    ax1 = plt.subplot2grid((3, 4), (0, 0), colspan=2, aspect='auto')  # Top left
-    ax2 = plt.subplot2grid((3, 4), (0, 2), colspan=2, aspect='auto')  # Top right
-    ax3 = plt.subplot2grid((3, 4), (1, 0), colspan=2, aspect='equal')  # Middle left
-    ax4 = plt.subplot2grid((3, 4), (1, 2), colspan=2, aspect='equal')  # Middle right
-    ax5 = plt.subplot2grid((3, 4), (2, 1), colspan=2, aspect='equal')  # Bottom center
-    axs= [ax1, ax2, ax3, ax4, ax5]
+    # Create 4x4 grid layout with custom height ratios
+    # Row 0: 2 plots (columns 0-1 and 2-3)
+    # Row 1: 2 plots (columns 0-1 and 2-3)
+    # Row 2: colorbar (columns 0-3, thin height)
+    # Row 3: 1 centered plot (columns 1-2)
+    
+    # Use gridspec for better control over height ratios
+    gs = fig.add_gridspec(4, 4, height_ratios=[1, 1, 0.1, 1])
+    
+    ax1 = fig.add_subplot(gs[0, 0:2])  # Top left
+    ax2 = fig.add_subplot(gs[0, 2:4])  # Top right
+    ax3 = fig.add_subplot(gs[1, 0:2])  # Middle left
+    ax4 = fig.add_subplot(gs[1, 2:4])  # Middle right
+    ax_cbar = fig.add_subplot(gs[2, :])  # Colorbar row (full width, thin)
+    ax5 = fig.add_subplot(gs[3, 1:3])  # Bottom center plot
+    
+    # Set aspect ratios
+    ax1.set_aspect('auto')
+    ax2.set_aspect('auto')
+    ax3.set_aspect('equal')
+    ax4.set_aspect('equal')
+    ax5.set_aspect('equal')
+    
+    axs = [ax1, ax2, ax3, ax4, ax5]
     
     ax = ax1
 
@@ -56,14 +71,14 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
         ax.set_xlabel('Gamma ("Azimuth axis") [deg]')
         ax.set_ylabel('Omega ("Elevation axis") [deg]')
         return im
-    im = plot_points_gammaomega(gamma, omega, signal_original, ax, vmin=sky_db, vmax=sun_db)
-    fig.colorbar(im, ax=ax, label='Signal strength [dB]')
+    vmin= min(signal_original.min(), sun_sim.min())
+    vmax= max(signal_original.max(), sun_sim.max())
+    im = plot_points_gammaomega(gamma, omega, signal_original, ax, vmin=vmin, vmax=vmax)
     ax = ax2
-    im = plot_points_gammaomega(gamma, omega, sun_sim, ax, vmin=sky_db, vmax=sun_db)
+    im = plot_points_gammaomega(gamma, omega, sun_sim, ax, vmin=vmin, vmax=vmax)
     # remove y tick labels
     ax.set_yticklabels([])
     ax.set_ylabel('')
-    fig.colorbar(im, ax=ax, label='Simulated signal [dB]')
 
     # Plot measurements and simulation with the uncorrected tangent plane positions
     # simulator_noback = SunSimulator(dgamma=params['dgamma'], domega=params['domega'], fwhm_x=params['fwhm_x'], fwhm_y=params['fwhm_y'], limb_darkening=params['limb_darkening'], backlash_gamma=0.0, dtime=0.0, lut=simulator.lut, sky=simulator.sky)
@@ -83,18 +98,18 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     fig.colorbar(im, ax=ax, label='Measured - Simulated [dB]')
 
     ax = ax3
-    im = _plot_points_tangent_plane(sun_pos_corrected, signal_original, ax, vmin=sky_db, vmax=sun_db)
+    im = _plot_points_tangent_plane(sun_pos_corrected, signal_original, ax, vmin=vmin, vmax=vmax)
     ax = ax4
     ax.pcolormesh(plane_full_x.values, plane_full_y.values, sim_full.values, cmap='turbo', alpha=0.2)
-    ax.contour(plane_full_x.values, plane_full_y.values, sim_full.values, levels=[
-               0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99], cmap='turbo', linewidths=1)
-    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim, ax, vmin=sky_db, vmax=sun_db)
+    contour_levels= np.asarray([0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99])
+    contour_levels= vmin+ contour_levels*(vmax-vmin)
+    ax.contour(plane_full_x.values, plane_full_y.values, sim_full.values, levels=contour_levels, cmap='turbo', linewidths=1)
+    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim, ax, vmin=vmin, vmax=vmax)
     ax.set_yticklabels([])
     ax.set_ylabel('')
 
     # Create a single colorbar for the lower row
-    cax = fig.add_axes([0.2, 0.0, 0.7, 0.02])  # Adjust position and size of the colorbar
-    fig.colorbar(im, cax=cax, orientation='horizontal', label='Signal Strength [dB]')
+    fig.colorbar(im, cax=ax_cbar, orientation='horizontal', label='Signal Strength [dB]')
     reverse = omega.mean()>90
     fig.suptitle(f"{starttime.strftime('%Y-%m-%d %H:%M')}\n"+"\n".join([f"{k}: {v:.4f}" for k, v in params.items()])+f'\nreverse: {reverse}', fontsize='small')
     ax.set_aspect('equal')

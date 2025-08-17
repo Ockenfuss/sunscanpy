@@ -2,18 +2,22 @@
 import numpy as np
 import xarray as xr
 import pytest
-from sunscan.sun_simulation import get_world_to_beam_matrix, get_beamcentered_unitvectors, LookupTable
+from sunscan.sun_simulation import get_world_to_beam_matrix, get_beamcentered_unitvectors, LookupTable, get_beamcentered_coords
 #%%
 
 class TestLookupTable:
     def test_lookup_table(self):
-        da=LookupTable.calculate_new(2,2, fwhm_x=[0.1], fwhm_y=[0.1])
-        da.squeeze().plot()
-        lut=LookupTable(da, apparent_sun_diameter=10)
-        #%%
-        lut.lookup(lx=4, ly=0.0, fwhm_x=0.1, fwhm_y=0.1, limb_darkening=1.0)
-        #%%
+        da=LookupTable.calculate_new(2,2, fwhm_x=[0.53], fwhm_y=[0.53]) #internally, we assume a sun diameter of 0.53, so the beam is exactly the size of the sun disk at fwhm
+        # in this case, the value should be close to 0.5, since the 2D gaussian has a volume of 0.5 within the fwhm circle
+        np.testing.assert_allclose(da.sel(lx=0, ly=0, method='nearest').item(), 0.5, rtol=1e-1)
 
+        # let's make the beam very narrow, such that we essentially get the sun disk
+        da=LookupTable.calculate_new(2,2, fwhm_x=[0.01], fwhm_y=[0.01])
+        # for an apparent sun diameter of 10, we would expect 0 outside of the sun disk (lx>5) and 1 inside (lx<5)
+        lut=LookupTable(da, apparent_sun_diameter=10)
+        np.testing.assert_allclose(lut.lookup(lx=0, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 1.0)
+        np.testing.assert_allclose(lut.lookup(lx=4.5, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 1.0, atol=1e-5)
+        np.testing.assert_allclose(lut.lookup(lx=5.5, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 0.0, atol=1e-5)
 
 def test_beam_unitvectors_orientation():
     beam_azi=0.0
@@ -128,3 +132,15 @@ def test_world_to_beam_matrix_xarray_input():
     assert 'col' in transform_matrix.dims
     assert transform_matrix.sizes['row'] == 3
     assert transform_matrix.sizes['col'] == 3
+
+def test_beam_differences():
+    """ Test that one degree difference in azimuth or elevation results in about 1 unit difference in beam coordinates. """
+    azi_beam, elv_beam = 123, 0 #1:1 correspondence in azimuth only works at the horizon
+    azi_diff = np.linspace(-0.1, 0.1, 10) #use only small differences
+    elv_diff = np.linspace(-0.1, 0.1, 10)
+    azi_sun, elv_sun = azi_beam + azi_diff, elv_beam + elv_diff
+    azi_beam, elv_beam = azi_beam + 0*azi_diff, elv_beam + 0*elv_diff
+    beam_coords=get_beamcentered_coords(azi_beam, elv_beam, azi_sun, elv_sun)
+    azi_bc, elv_bc=beam_coords.isel(row=0).values, beam_coords.isel(row=1).values
+    np.testing.assert_allclose(azi_diff, azi_bc, atol=1e-4)
+    np.testing.assert_allclose(elv_diff, elv_bc, atol=1e-4)
