@@ -4,8 +4,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sunscan.scanner import IdentityScanner, BacklashScanner
 from sunscan.math_utils import geometric_slerp, spherical_to_cartesian, cartesian_to_spherical
-
-from sunscan.sun_simulation import SunSimulator, norm_signal
+from sunscan.sun_simulation import SunSimulator
+from sunscan.utils import db_to_linear, linear_to_db
 
 def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax, vmin=0, vmax=1, cmap='turbo'):
     ax.axvline(x=0, color='k', linestyle='--')
@@ -18,11 +18,12 @@ def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax, vmin=0, vmax=1, cma
     return im
 
 
-def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_original, gammav, omegav, sky):
+def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_db, gammav, omegav, sky):
     sun_azi, sun_elv=sky.compute_sun_location(time)
     # signal_normed = norm_signal(signal_original)
     starttime = pd.to_datetime(time.min())
-    sun_sim= simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
+    sun_sim_lin= simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
+    sun_sim_db= linear_to_db(sun_sim_lin)
     params=simulator.get_params()
 
     sun_pos_corrected = simulator.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
@@ -34,7 +35,8 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     # sun_contribution = simulator.lut.lookup(lx=plane_full_x, ly=plane_full_y, fwhm_x=simulator.fwhm_x, fwhm_y=simulator.fwhm_y, limb_darkening=simulator.limb_darkening)
     # sun_sim_linear= db_to_linear(self.sky_db)*(1-sun_contribution) + db_to_linear(self.sun_db)*sun_contribution
     # sun_sim_db= linear_to_db(sun_sim_linear)
-    sim_full = simulator.signal_from_bc_coords(plane_full_x, plane_full_y)
+    sim_full_lin = simulator.signal_from_bc_coords(plane_full_x, plane_full_y)
+    sim_full_db= linear_to_db(sim_full_lin)
 
     #
     fig = plt.figure(figsize=(8, 12), layout='tight')
@@ -71,11 +73,11 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
         ax.set_xlabel('Gamma ("Azimuth axis") [deg]')
         ax.set_ylabel('Omega ("Elevation axis") [deg]')
         return im
-    vmin= min(signal_original.min(), sun_sim.min())
-    vmax= max(signal_original.max(), sun_sim.max())
-    im = plot_points_gammaomega(gamma, omega, signal_original, ax, vmin=vmin, vmax=vmax)
+    vmin= min(signal_db.min(), sun_sim_db.min())
+    vmax= max(signal_db.max(), sun_sim_db.max())
+    im = plot_points_gammaomega(gamma, omega, signal_db, ax, vmin=vmin, vmax=vmax)
     ax = ax2
-    im = plot_points_gammaomega(gamma, omega, sun_sim, ax, vmin=vmin, vmax=vmax)
+    im = plot_points_gammaomega(gamma, omega, sun_sim_db, ax, vmin=vmin, vmax=vmax)
     # remove y tick labels
     ax.set_yticklabels([])
     ax.set_ylabel('')
@@ -93,18 +95,20 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_o
     # ax.set_ylabel('')
 
     ax = ax5
-    diff=signal_original-sun_sim
+    diff=signal_db-sun_sim_db
     im = _plot_points_tangent_plane(sun_pos_corrected, diff , ax, vmin=None, vmax=None, cmap='coolwarm')
     fig.colorbar(im, ax=ax, label='Measured - Simulated [dB]')
 
     ax = ax3
-    im = _plot_points_tangent_plane(sun_pos_corrected, signal_original, ax, vmin=vmin, vmax=vmax)
+    im = _plot_points_tangent_plane(sun_pos_corrected, signal_db, ax, vmin=vmin, vmax=vmax)
     ax = ax4
-    ax.pcolormesh(plane_full_x.values, plane_full_y.values, sim_full.values, cmap='turbo', alpha=0.2)
+    ax.pcolormesh(plane_full_x.values, plane_full_y.values, sim_full_db.values, cmap='turbo', alpha=0.2)
     contour_levels= np.asarray([0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99])
+    print(contour_levels)
     contour_levels= vmin+ contour_levels*(vmax-vmin)
-    ax.contour(plane_full_x.values, plane_full_y.values, sim_full.values, levels=contour_levels, cmap='turbo', linewidths=1)
-    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim, ax, vmin=vmin, vmax=vmax)
+    print(contour_levels)
+    ax.contour(plane_full_x.values, plane_full_y.values, sim_full_db.values, levels=contour_levels, cmap='turbo', linewidths=1)
+    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim_db, ax, vmin=vmin, vmax=vmax)
     ax.set_yticklabels([])
     ax.set_ylabel('')
 

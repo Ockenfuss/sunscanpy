@@ -215,20 +215,15 @@ def get_beamcentered_coords(azi_beam, elv_beam, azi_sun, elv_sun):
     sun_pos_beam = (world_to_beam*positions).sum(dim='col')
     return sun_pos_beam
 
-def norm_signal(signal_db):
-    """Normalize the signal to the range [0, 1]."""
-    signal_linear= 10**(signal_db/10)  # convert dB to linear scale
-    return (signal_linear-signal_linear.min())/(signal_linear.max()-signal_linear.min())
-
 class SunSimulator(object):
-    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut: LookupTable, sky_db, sun_db, sky=None):
+    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut: LookupTable, sky_lin, sun_lin, sky=None):
         self.lut = lut
         self.fwhm_x = fwhm_x
         self.fwhm_y = fwhm_y
         self.limb_darkening = limb_darkening
         self.sky = sky
-        self.sky_db = sky_db
-        self.sun_db = sun_db
+        self.sky_lin = sky_lin
+        self.sun_lin = sun_lin
         self.local_scanner = BacklashScanner(dgamma, domega, dtime, backlash_gamma, flex=0)
     
     def get_params(self):
@@ -242,8 +237,8 @@ class SunSimulator(object):
             "fwhm_y": self.fwhm_y,
             "backlash_gamma": scanner_params['backlash_gamma'],
             "limb_darkening": self.limb_darkening,
-            "sky_db": self.sky_db,
-            "sun_db": self.sun_db,
+            "sky_lin": self.sky_lin,
+            "sun_lin": self.sun_lin,
         }
     
     def __repr__(self):
@@ -255,8 +250,8 @@ class SunSimulator(object):
             f"Beamwidth co-elevation: {self.fwhm_y:.4f} º\n" + \
             f"Azimuth Backlash: {self.local_scanner.backlash_gamma:.4f} º\n" + \
             f"Limb Darkening factor: {self.limb_darkening:.4f}\n" + \
-            f"Sky Noise: {self.sky_db:.4f} dB\n" + \
-            f"Sun Brightness: {self.sun_db:.4f} dB\n"
+            f"Sky Noise: {self.sky_lin:.4f} [lin. units]\n" + \
+            f"Sun Brightness: {self.sun_lin:.4f} [lin. units]\n"
     
     def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
         beam_azi, beam_elv = self.local_scanner.forward(gamma, omega, gammav=gammav, omegav=omegav)
@@ -270,9 +265,8 @@ class SunSimulator(object):
     
     def signal_from_bc_coords(self, lx, ly):
         sun_contribution = self.lut.lookup(lx=lx, ly=ly, fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
-        sun_sim_linear= db_to_linear(self.sky_db)*(1-sun_contribution) + db_to_linear(self.sun_db)*sun_contribution
-        sun_sim_db= linear_to_db(sun_sim_linear)
-        return sun_sim_db
+        sun_sim_linear= self.sky_lin*(1-sun_contribution) + self.sun_lin*sun_contribution
+        return sun_sim_linear
     
     def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
         # get the tangential coordinates of the sun position
@@ -280,8 +274,8 @@ class SunSimulator(object):
         # Therefore, this version of forward exists, which takes the sun position as input.
         sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
         lx, ly=sunpos_tangential.sel(row=0), sunpos_tangential.sel(row=1)
-        sun_sim_db = self.signal_from_bc_coords(lx, ly)
-        return sun_sim_db
+        sun_sim_lin = self.signal_from_bc_coords(lx, ly)
+        return sun_sim_lin
     
     def forward(self, gamma, omega, time, gammav, omegav):
         sun_azi, sun_elv = self.sky.compute_sun_location(t=time)
@@ -308,30 +302,28 @@ class SunSimulator(object):
         gamma_s, omega_s=self.local_scanner.inverse(beam_azi, beam_elv, gammav=0.0, omegav=0.0, reverse=reverse)
         return gamma_s, omega_s, beam_azi, beam_elv
 
-def sun_db_from_center_signal(lut: LookupTable, center_db, sky_db, fwhm_x, fwhm_y, limb_darkening):
-    sky_linear= db_to_linear(sky_db)
-    center_linear= db_to_linear(center_db)
+def sun_lin_from_center_signal(lut: LookupTable, center_lin, sky_lin, fwhm_x, fwhm_y, limb_darkening):
     sun_contribution = lut.lookup(0,0, fwhm_x, fwhm_y, limb_darkening)
     sky_contribution = 1- sun_contribution
-    sun_linear = (center_linear - sky_linear* sky_contribution) / sun_contribution
-    sun_db= linear_to_db(sun_linear)
-    return sun_db
+    sun_linear = (center_lin - sky_lin* sky_contribution) / sun_contribution
+    return sun_linear
         
 
 
-def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, sky_db, sun_db):
-    simulator= SunSimulator(**params_dict, lut=lut, sky_db=sky_db, sun_db=sun_db)
+def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, sky_lin, sun_lin):
+    simulator= SunSimulator(**params_dict, lut=lut, sky_lin=sky_lin, sun_lin=sun_lin)
     # for performance reasons, we we use the forward_sun method and calculate the sun position once externally
-    sun_sim_db = simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
-    return sun_sim_db
+    sun_sim_lin = simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
+    return sun_sim_lin
         
-def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_db, gammav, omegav, lut:LookupTable, sky_db, sun_db):
+def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_lin, gammav, omegav, lut:LookupTable, sky_lin, sun_lin):
     params_dict= {k: params_list[v] for k, v in SUNSIM_PARAMETER_MAP.items()}
-    if sun_db is None: 
+    if sun_lin is None: 
         # assume that the maximum signal is from pointing to the center of the sun-> Determine sun brightness from the max signal and the beam width
-        sun_db=sun_db_from_center_signal(lut, signal_db.max(), sky_db, params_dict['fwhm_x'], params_dict['fwhm_y'], params_dict['limb_darkening'])
-    sun_sim_db = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, sky_db, sun_db)
-    error = sun_sim_db-signal_db
+        sun_lin=sun_lin_from_center_signal(lut, signal_lin.max(), sky_lin, params_dict['fwhm_x'], params_dict['fwhm_y'], params_dict['limb_darkening'])
+    sun_sim_lin = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, sky_lin, sun_lin)
+    #db error
+    error = linear_to_db(sun_sim_lin) - linear_to_db(signal_lin)
     # linear error
     # error = db_to_linear(sun_sim_db) - db_to_linear(signal_db)
     # se= (error**2).sum().item()
@@ -339,11 +331,12 @@ def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_db, ga
 
 
 class SunSimulationEstimator(object):
-    def __init__(self, sky, params_optimize=None, params_guess=None, params_bounds=None, lutpath=None, sky_db=None, sun_db=None):
+    def __init__(self, sky, params_optimize=None, params_guess=None, params_bounds=None, lutpath=None, sky_lin=None, sun_lin=None):
         self.lutpath=lutpath
         self.sky = sky
-        self.sky_db = sky_db
-        self.sun_db = sun_db
+        self.sky_lin = sky_lin
+        self.sun_lin = sun_lin
+
         if params_optimize is None:
             params_optimize = sc_params['sunsim_params_optimize'].copy()
         if params_guess is None:
@@ -367,12 +360,13 @@ class SunSimulationEstimator(object):
         self.params_bounds = params_bounds
     
     def fit(self, gamma, omega, time, signal_db, gammav, omegav, brute_force=True, brute_force_points=3):
-        sky_db=self.sky_db
-        if sky_db is None:
-            sky_db = signal_db.min() 
-            #if sun_db is also None, it will be determined during the optimization based on the beam width and the maximum signal
+        signal_lin= db_to_linear(signal_db)
+        sky_lin=self.sky_lin
+        if sky_lin is None:
+            sky_lin = signal_lin.min() 
+            #if sun_lin is also None, it will be determined during the optimization based on the beam width and the maximum signal
 
-        time_max = signal_db.argmax()
+        time_max = signal_lin.argmax()
         apparent_sun_diameter = self.sky.get_sun_diameter(t=time[time_max])
         lut=LookupTable.load_or_create_if_necessary(self.lutpath, apparent_sun_diameter)
 
@@ -392,25 +386,25 @@ class SunSimulationEstimator(object):
         gamma_xr= xr.DataArray(gamma, dims='sample')
         omega_xr= xr.DataArray(omega, dims='sample')
         time_xr= xr.DataArray(time, dims='sample')
-        signal_db_xr= xr.DataArray(signal_db, dims='sample')
+        signal_lin_xr= xr.DataArray(signal_lin, dims='sample')
         gammav_xr= xr.DataArray(gammav, dims='sample')
         omegav_xr= xr.DataArray(omegav, dims='sample')
         sun_azi, sun_elv = xr.apply_ufunc(self.sky.compute_sun_location, time_xr, output_core_dims=[[],[]])
         # check that with the initial guess, the relative difference between sun and scanner is within the lookup table
-        init_simulator= SunSimulator(**params_guess, lut=lut, sky=self.sky, sky_db=sky_db, sun_db=self.sun_db)
+        init_simulator= SunSimulator(**params_guess, lut=lut, sky=self.sky, sky_lin=sky_lin, sun_lin=self.sun_lin)
         valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv, gammav_xr, omegav_xr)
         if not valid.all():
             logger.warning(f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
             gamma_xr= gamma_xr.where(valid, drop=True)
             omega_xr= omega_xr.where(valid, drop=True)
-            signal_db_xr= signal_db_xr.where(valid, drop=True)
+            signal_lin_xr= signal_lin_xr.where(valid, drop=True)
             gammav_xr= gammav_xr.where(valid, drop=True)
             omegav_xr= omegav_xr.where(valid, drop=True)
             time_xr= time_xr.where(valid, drop=True)
             sun_azi= sun_azi.where(valid, drop=True)
             sun_elv= sun_elv.where(valid, drop=True)
         
-        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_db_xr, gammav_xr, omegav_xr, lut, sky_db, self.sun_db)
+        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_lin_xr, gammav_xr, omegav_xr, lut, sky_lin, self.sun_lin)
         params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SUNSIM_PARAMETER_MAP)
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         if brute_force:
@@ -437,11 +431,11 @@ class SunSimulationEstimator(object):
         logger.info(f"Initial objective: {init_rmse:.6f}")
         logger.info(f"Optimal objective: {opt_res.fun:.6f}")
 
-        if self.sun_db is None: 
-            sun_db=sun_db_from_center_signal(lut, signal_db.max(), sky_db, fit_result_dict['fwhm_x'], fit_result_dict['fwhm_y'], fit_result_dict['limb_darkening'])
+        if self.sun_lin is None: 
+            sun_lin=sun_lin_from_center_signal(lut, signal_lin.max(), sky_lin, fit_result_dict['fwhm_x'], fit_result_dict['fwhm_y'], fit_result_dict['limb_darkening'])
         else:
-            sun_db=self.sun_db
-        fitted_simulator= SunSimulator(**fit_result_dict, lut=lut, sky=self.sky, sky_db=sky_db, sun_db=sun_db)
+            sun_lin=self.sun_lin
+        fitted_simulator= SunSimulator(**fit_result_dict, lut=lut, sky=self.sky, sky_lin=sky_lin, sun_lin=sun_lin)
         return fitted_simulator, opt_res.fun
 
 
