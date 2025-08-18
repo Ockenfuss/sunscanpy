@@ -104,9 +104,7 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_d
     ax = ax4
     ax.pcolormesh(plane_full_x.values, plane_full_y.values, sim_full_db.values, cmap='turbo', alpha=0.2)
     contour_levels= np.asarray([0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99])
-    print(contour_levels)
     contour_levels= vmin+ contour_levels*(vmax-vmin)
-    print(contour_levels)
     ax.contour(plane_full_x.values, plane_full_y.values, sim_full_db.values, levels=contour_levels, cmap='turbo', linewidths=1)
     im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim_db, ax, vmin=vmin, vmax=vmax)
     ax.set_yticklabels([])
