@@ -1,6 +1,5 @@
 import xarray as xr
 import numpy as np
-import ikpy
 from ikpy.chain import Chain
 from ikpy.link import OriginLink, URDFLink
 from sunscan.math_utils import spherical_to_cartesian, calc_azi_diff
@@ -130,16 +129,16 @@ class BacklashScanner(Scanner):
 
 
 #%% 2D pan tilt system
-def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon, omega_bounds=None):
+def generate_pt_chain(alpha, delta, beta, epsilon, omega_bounds=None):
     d=1
-    gamma_offset=np.deg2rad(gamma_offset)
-    omega_offset=np.deg2rad(omega_offset)
     alpha=np.deg2rad(alpha)
     delta=np.deg2rad(delta)
     beta=np.deg2rad(beta)
     epsilon=np.deg2rad(epsilon)
     if omega_bounds is not None:
-        omega_bounds = (np.deg2rad(omega_bounds[0]), np.deg2rad(omega_bounds[1]))
+        j2_bounds=(_gam_om_to_joint(-999, omega_bounds[0])[1], _gam_om_to_joint(-999, omega_bounds[1])[1])
+    else:
+        j2_bounds=None
     pt_chain= Chain(name='pan_tilt', links=[
         OriginLink(),
         URDFLink(
@@ -149,23 +148,11 @@ def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon, o
             rotation=[0, 0, 1],
         ),
         URDFLink(
-            name='azimuth_offset',
-            origin_translation=[0, 0, d],
-            origin_orientation=[0, 0, gamma_offset],
-            rotation=[0, 0, 1], 
-        ),
-        URDFLink(
             name="tilt",
             origin_translation=[0,0,d],
             origin_orientation=[beta,0,  0],
             rotation=[0, -1, 0],
-            bounds=omega_bounds
-        ),
-        URDFLink(
-            name='elevation_offset',
-            origin_translation=[0, 0, d/10],
-            origin_orientation=[0, np.pi/2-omega_offset, 0],
-            rotation=[0, 1, 0],
+            bounds=j2_bounds
         ),
         URDFLink(
             name="dish",
@@ -174,7 +161,7 @@ def generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon, o
             rotation=[1, 0, 0],
         )
     ],
-        active_links_mask=[False, True, False, True, False, False]
+        active_links_mask=[False, True, True, False]
     )
     return pt_chain
 
@@ -198,41 +185,50 @@ def _vector_to_azielv(z_axis, x_axis=None, eps=1e-8):
         azi = np.arctan2(z_axis[1], z_axis[0])
     return np.rad2deg(azi), np.rad2deg(elv)
 
-def _gam_om_to_joint_positions(gamma, omega):
+def _gam_om_to_joint(gamma, omega):
+    j1=np.deg2rad(gamma)
+    j2=np.deg2rad(omega-90)
+    return j1, j2
+
+def _joint_to_gam_om(j1, j2):
+    """ Convert joint angles to gamma and omega in degrees """
+    gamma = np.rad2deg(j1)
+    omega = np.rad2deg(j2) + 90
+    return gamma, omega
+
+def _gam_om_to_joint_list(gamma, omega):
     """ gamma (azimuth) and omega (elevation) in degrees"""
-    positions=np.zeros((len(gamma), 6))
-    positions[:, 1] = np.deg2rad(gamma)
-    positions[:, 3] = np.deg2rad(omega)
+    j1, j2= _gam_om_to_joint(gamma, omega)
+    positions=np.zeros((len(gamma), 4))
+    positions[:, 1] = j1
+    positions[:, 2] = j2
     return positions
 
-def _joint_positions_to_gam_om(positions):
+def _joint_list_to_gam_om(positions):
     """ positions in degrees"""
-    gamma = np.rad2deg(positions[:,1])
-    omega = np.rad2deg(positions[:,3])
+    j1,j2= positions[:, 1], positions[:, 2]
+    gamma, omega= _joint_to_gam_om(j1, j2)
     return gamma, omega
 
 class GeneralScanner(Scanner):
     def __init__(self, gamma_offset, omega_offset, alpha, delta, beta, epsilon, dtime, backlash_gamma, flex):
         """General scanner model M_G(gamma, omega) = (phi, theta)
-        This model assumes a scanner with pan-tilt mechanism and a dish.
         """
         super().__init__()
-        self.gamma_offset = gamma_offset
-        self.omega_offset = omega_offset
         self.alpha = alpha
         self.delta = delta
         self.beta = beta
         self.epsilon = epsilon
-        self.backlash_scanner= BacklashScanner(dtime=dtime, backlash_gamma=backlash_gamma, gamma_offset=0, omega_offset=0, flex=flex) #the constant offsets are handled by the chain
-        self.chain = generate_pt_chain(gamma_offset, omega_offset, alpha, delta, beta, epsilon)
+        self.backlash_scanner= BacklashScanner(dtime=dtime, backlash_gamma=backlash_gamma, gamma_offset=gamma_offset, omega_offset=omega_offset, flex=flex)
+        self.chain = generate_pt_chain(alpha, delta, beta, epsilon)
     
     def _get_joint_positions(self, gamma, omega, gammav=0, omegav=0):
         gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav, omegav)
-        positions=_gam_om_to_joint_positions(gamma, omega)
+        positions=_gam_om_to_joint_list(gamma, omega)
         return positions
     
     def _get_gamma_omega(self, positions, gammav=0, omegav=0):
-        gamma, omega= _joint_positions_to_gam_om(positions)
+        gamma, omega= _joint_list_to_gam_om(positions)
         gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav, omegav)
         return gamma, omega
     
@@ -270,7 +266,7 @@ class GeneralScanner(Scanner):
         return azi_list%360, elv_list
     
     def _create_bounded_chain_copy(self, omega_bounds):
-        chain=generate_pt_chain(self.gamma_offset, self.omega_offset, self.alpha, self.delta, self.beta, self.epsilon, omega_bounds=omega_bounds)
+        chain=generate_pt_chain(self.alpha, self.delta, self.beta, self.epsilon, omega_bounds=omega_bounds)
         return chain
 
     def inverse(self, azi, elv, gammav=0, omegav=0, reverse=None):
@@ -278,16 +274,18 @@ class GeneralScanner(Scanner):
         elv= np.atleast_1d(elv)
         if reverse is None:
             chain = self.chain
-        elif reverse == False:
-            chain = self._create_bounded_chain_copy(omega_bounds=(-20,90))
-        elif reverse == True:
-            chain = self._create_bounded_chain_copy(omega_bounds=(90,200))
-        identity_scanner=IdentityScanner()
+        else:
+            if reverse == False:
+                omega_bounds_offset=np.array([-20, 90])
+            else:
+                omega_bounds_offset=np.array([90, 200])
+            _, omega_bounds = self.backlash_scanner.remove_offsets(0, omega_bounds_offset, 0,0)
+            chain = self._create_bounded_chain_copy(omega_bounds=omega_bounds)
         reverse_guess = False if reverse is None else reverse
         positions=[]
         target_vector= spherical_to_cartesian(azi,elv)
-        gamma_guess, omega_guess = identity_scanner.inverse(azi, elv, reverse=reverse_guess)
-        initial_positions=_gam_om_to_joint_positions(gamma_guess, omega_guess)
+        gamma_guess, omega_guess = self.backlash_scanner.inverse(azi, elv, gammav=gammav, omegav=omegav, reverse=reverse_guess)
+        initial_positions=_gam_om_to_joint_list(gamma_guess, omega_guess)
         for initial_pos in initial_positions:
             # calculate the orientation vector
             pos=chain.inverse_kinematics(target_orientation=target_vector, orientation_mode='Z', initial_position=initial_pos)
@@ -306,8 +304,8 @@ class GeneralScanner(Scanner):
         """Get the parameters of the scanner as a dictionary."""
         backlash_params = self.backlash_scanner.get_params()
         return {
-            'gamma_offset': self.gamma_offset,
-            'omega_offset': self.omega_offset,
+            'gamma_offset': self.backlash_scanner.gamma_offset,
+            'omega_offset': self.backlash_scanner.omega_offset,
             'alpha': self.alpha,
             'delta': self.delta,
             'beta': self.beta,
@@ -319,8 +317,8 @@ class GeneralScanner(Scanner):
     
     def __repr__(self):
         return "General Scanner Model:\n" + \
-               f"Azimuth Offset: {self.gamma_offset:.4f} º\n" + \
-               f"Elevation Offset: {self.omega_offset:.4f} º\n" + \
+               f"Azimuth Offset: {self.backlash_scanner.gamma_offset:.4f} º\n" + \
+               f"Elevation Offset: {self.backlash_scanner.omega_offset:.4f} º\n" + \
                f"Alpha: {self.alpha:.4f} º\n" + \
                f"Delta: {self.delta:.4f} º\n" + \
                f"Beta: {self.beta:.4f} º\n" + \
