@@ -242,6 +242,65 @@ class TestGeneralScannerForward:
         expected = np.array([0, 1, 0])  # Should point along +Y
         actual = scanner.forward_pointing(azi, elv)
         np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-10)
+    
+    @pytest.mark.parametrize("gamma_offset,omega_offset", [
+        (0.0, 0.0),      # No offsets
+        (15.0, 10.0),    # Positive offsets
+        (-10.0, -5.0),   # Negative offsets
+        (45.0, 0.0),     # Only gamma offset
+        (0.0, 30.0),     # Only omega offset
+        (180.0, 90.0),   # Large offsets
+        (-180.0, -90.0), # Large negative offsets
+    ])
+    def test_offset_consistent(self, gamma_offset, omega_offset):
+        """Test that gamma/omega offsets give same result as pre-adding offsets to inputs."""
+        # Test points (1D arrays)
+        test_gamma = np.array([0, 45, 90, 135, 180])
+        test_omega = np.array([30, 60, 90, 120, 150])
+        
+        # Scanner with offsets
+        scanner_with_offset = self.make_scanner(
+            gamma_offset=gamma_offset,
+            omega_offset=omega_offset
+        )
+        
+        # Scanner without offsets
+        scanner_no_offset = self.make_scanner()
+        
+        # Test with 1D array inputs (5 test points)
+        # Method 1: Use scanner with built-in offsets
+        result1 = scanner_with_offset.forward_pointing(test_gamma, test_omega)
+        
+        # Method 2: Manually add offsets and use scanner without offsets
+        gamma_with_offset = test_gamma + gamma_offset
+        omega_with_offset = test_omega + omega_offset
+        result2 = scanner_no_offset.forward_pointing(gamma_with_offset, omega_with_offset)
+        
+        # Results should be identical
+        np.testing.assert_allclose(
+            result1, result2, rtol=1e-10, atol=1e-10,
+            err_msg=f"Offset inconsistency with gamma_offset={gamma_offset}, omega_offset={omega_offset}"
+        )
+        
+        # Also test individual scalar values for edge cases
+        gamma = test_gamma[2]
+        omega = test_omega[2]
+        
+        # Method 1: Use scanner with built-in offsets
+        result1_scalar = scanner_with_offset.forward_pointing(gamma, omega)
+        
+        # Method 2: Manually add offsets and use scanner without offsets
+        result2_scalar = scanner_no_offset.forward_pointing(
+            gamma + gamma_offset,
+            omega + omega_offset
+        )
+        
+        # Results should be identical
+        np.testing.assert_allclose(
+            result1_scalar, result2_scalar, rtol=1e-10, atol=1e-10,
+            err_msg=f"Scalar offset inconsistency at gamma={gamma}, omega={omega} with offsets ({gamma_offset}, {omega_offset})"
+        )
+        
 
     def test_alpha_rotates_upward(self):
         # alpha tilt around X should cause small positive Z-component at gamma=90, elv=0 (westward tilt)
