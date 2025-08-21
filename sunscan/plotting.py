@@ -29,7 +29,8 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_d
         x_mean= np.mean(sun_pos_bc_x)
         y_std= np.std(sun_pos_bc_y)
         y_mean= np.mean(sun_pos_bc_y)
-        is_outlier = (np.abs(sun_pos_bc_x-x_mean)>3*x_std) | (np.abs(sun_pos_bc_y-y_mean)>3*y_std)
+        n_std=2
+        is_outlier = (np.abs(sun_pos_bc_x-x_mean)>n_std*x_std) | (np.abs(sun_pos_bc_y-y_mean)>n_std*y_std)
         gamma= gamma[~is_outlier]
         omega= omega[~is_outlier]
         gammav= gammav[~is_outlier]
