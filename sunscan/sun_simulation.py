@@ -303,7 +303,7 @@ class SunSimulator(object):
         return gamma_s, omega_s, beam_azi, beam_elv
 
 def sun_lin_from_center_signal(lut: LookupTable, center_lin, sky_lin, fwhm_x, fwhm_y, limb_darkening):
-    sun_contribution = lut.lookup(0,0, fwhm_x, fwhm_y, limb_darkening)
+    sun_contribution = lut.lookup(0,0, fwhm_x, fwhm_y, limb_darkening).item()
     sky_contribution = 1- sun_contribution
     sun_linear = (center_lin - sky_lin* sky_contribution) / sun_contribution
     return sun_linear
