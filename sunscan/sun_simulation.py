@@ -275,7 +275,7 @@ class SunSimulator(object):
         sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
         lx, ly=sunpos_tangential.sel(row=0), sunpos_tangential.sel(row=1)
         sun_sim_lin = self.signal_from_bc_coords(lx, ly)
-        return sun_sim_lin
+        return sun_sim_lin.values
     
     def forward(self, gamma, omega, time, gammav, omegav):
         sun_azi, sun_elv = self.sky.compute_sun_location(t=time)
