@@ -7,10 +7,10 @@ from sunscan.math_utils import geometric_slerp, spherical_to_cartesian, cartesia
 from sunscan.sun_simulation import SunSimulator
 from sunscan.utils import db_to_linear, linear_to_db
 
-def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax, vmin=0, vmax=1, cmap='turbo'):
+def _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, sun_signal, ax, vmin=0, vmax=1, cmap='turbo'):
     ax.axvline(x=0, color='k', linestyle='--')
     ax.axhline(y=0, color='k', linestyle='--')
-    im = ax.scatter(sun_pos_plot.sel(row=0).values, sun_pos_plot.sel(row=1).values,
+    im = ax.scatter(sun_pos_bc_x, sun_pos_bc_y,
                     c=sun_signal, vmin=vmin, vmax=vmax, cmap=cmap, s=9.0)
     ax.set_xlabel('Cross-elevation [deg]')
     ax.set_ylabel('Co-elevation [deg]')
@@ -18,19 +18,38 @@ def _plot_points_tangent_plane(sun_pos_plot, sun_signal, ax, vmin=0, vmax=1, cma
     return im
 
 
-def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_db, gammav, omegav, sky):
+def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_db, gammav, omegav, sky, remove_outliers=False):
     sun_azi, sun_elv=sky.compute_sun_location(time)
+    sun_azi, sun_elv = np.asarray(sun_azi), np.asarray(sun_elv)
+    sun_pos_bc = simulator.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
+    sun_pos_bc_x= sun_pos_bc.sel(row=0).values
+    sun_pos_bc_y= sun_pos_bc.sel(row=1).values
+    if remove_outliers:
+        x_std= np.std(sun_pos_bc_x)
+        x_mean= np.mean(sun_pos_bc_x)
+        y_std= np.std(sun_pos_bc_y)
+        y_mean= np.mean(sun_pos_bc_y)
+        is_outlier = (np.abs(sun_pos_bc_x-x_mean)>3*x_std) | (np.abs(sun_pos_bc_y-y_mean)>3*y_std)
+        gamma= gamma[~is_outlier]
+        omega= omega[~is_outlier]
+        gammav= gammav[~is_outlier]
+        omegav= omegav[~is_outlier]
+        signal_db= signal_db[~is_outlier]
+        time= time[~is_outlier]
+        sun_pos_bc_x= sun_pos_bc_x[~is_outlier]
+        sun_pos_bc_y= sun_pos_bc_y[~is_outlier]
+        sun_azi= sun_azi[~is_outlier]
+        sun_elv= sun_elv[~is_outlier]
     # signal_normed = norm_signal(signal_original)
     starttime = pd.to_datetime(time.min())
     sun_sim_lin= simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     sun_sim_db= linear_to_db(sun_sim_lin)
     params=simulator.get_params()
 
-    sun_pos_corrected = simulator.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
-    plane_full_x = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=0).min().item(),
-                                sun_pos_corrected.isel(row=0).max().item(), 100), dims='plane_x')
-    plane_full_y = xr.DataArray(np.linspace(sun_pos_corrected.isel(row=1).min().item(),
-                                sun_pos_corrected.isel(row=1).max().item(), 100), dims='plane_y')
+    plane_full_x = xr.DataArray(np.linspace(sun_pos_bc_x.min(),
+                                sun_pos_bc_x.max(), 100), dims='plane_x')
+    plane_full_y = xr.DataArray(np.linspace(sun_pos_bc_y.min(),
+                                sun_pos_bc_y.max(), 100), dims='plane_y')
     plane_full_x, plane_full_y = xr.broadcast(plane_full_x, plane_full_y)
     # sun_contribution = simulator.lut.lookup(lx=plane_full_x, ly=plane_full_y, fwhm_x=simulator.fwhm_x, fwhm_y=simulator.fwhm_y, limb_darkening=simulator.limb_darkening)
     # sun_sim_linear= db_to_linear(self.sky_db)*(1-sun_contribution) + db_to_linear(self.sun_db)*sun_contribution
@@ -96,17 +115,17 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_d
 
     ax = ax5
     diff=signal_db-sun_sim_db
-    im = _plot_points_tangent_plane(sun_pos_corrected, diff , ax, vmin=None, vmax=None, cmap='coolwarm')
+    im = _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, diff , ax, vmin=None, vmax=None, cmap='coolwarm')
     fig.colorbar(im, ax=ax, label='Measured - Simulated [dB]')
 
     ax = ax3
-    im = _plot_points_tangent_plane(sun_pos_corrected, signal_db, ax, vmin=vmin, vmax=vmax)
+    im = _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, signal_db, ax, vmin=vmin, vmax=vmax)
     ax = ax4
     ax.pcolormesh(plane_full_x.values, plane_full_y.values, sim_full_db.values, cmap='turbo', alpha=0.2)
     contour_levels= np.asarray([0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 0.99])
     contour_levels= vmin+ contour_levels*(vmax-vmin)
     ax.contour(plane_full_x.values, plane_full_y.values, sim_full_db.values, levels=contour_levels, cmap='turbo', linewidths=1)
-    im = _plot_points_tangent_plane(sun_pos_corrected, sun_sim_db, ax, vmin=vmin, vmax=vmax)
+    im = _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, sun_sim_db, ax, vmin=vmin, vmax=vmax)
     ax.set_yticklabels([])
     ax.set_ylabel('')
 
