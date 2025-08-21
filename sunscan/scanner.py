@@ -91,12 +91,12 @@ class BacklashScanner(Scanner):
         return np.round(gamma_corr, 12)%360, omega_corr
     
     def remove_offsets(self, gamma, omega, gammav, omegav):
+        omega = omega - self.flex * np.cos(np.deg2rad(omega))
         gamma = gamma - self.gamma_offset
         gamma = gamma - self.backlash_gamma * np.sign(gammav)
         gamma = gamma - self.dtime * gammav
         omega = omega - self.omega_offset
         omega = omega - self.dtime * omegav
-        omega = omega - self.flex * np.cos(np.deg2rad(omega))
         return np.round(gamma, 12)%360.0, omega
 
     
