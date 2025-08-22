@@ -9,14 +9,14 @@ from scipy.optimize import minimize
 from scipy.ndimage import convolve
 
 from sunscan.utils import logger
-from sunscan.math_utils import spherical_to_xyz, rmse
+from sunscan.math_utils import spherical_to_xyz, rmse, bessel, gaussian
 from sunscan.scanner import IdentityScanner, BacklashScanner
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force
 from sunscan.utils import guess_offsets, format_input_xarray, db_to_linear, linear_to_db
 from sunscan.params import SUNSIM_PARAMETER_MAP, sc_params
 
 identity_scanner = IdentityScanner()
-LUT_VERSION='2.0'
+LUT_VERSION='3.1'
 
 class LookupTable:
     def __init__(self, dataarray, apparent_sun_diameter):
@@ -25,7 +25,7 @@ class LookupTable:
 
     @staticmethod
     def _from_file(filepath):
-        da = xr.open_dataarray(filepath)
+        da = xr.open_dataarray(filepath).load()
         version= da.attrs.get('version', None)
         return da, version
     
@@ -72,22 +72,18 @@ class LookupTable:
         sun = 1.0-(1.0-limb_darkening)*sundist/sun_rl
         sun = xr.where(sundist < sun_rl, sun, np.nan)
         sun = sun.dropna(dim='lx', how='all').dropna(dim='ly', how='all').fillna(0).rename(lx='sx', ly='sy')
-        # Gaussian beam
-        # FWHM = Full width half maximum
-        # FWHM = 2.355 * sigma
-        sigma_to_fwhm = 2*np.sqrt(2*np.log(2))
+        # Beam width
         fwhm_x_su = xr.DataArray(fwhm_x, dims='fwhm_x')/apparent_sun_diameter
         fwhm_x_su.coords['fwhm_x'] = fwhm_x
-        sigma_x_su = fwhm_x_su/sigma_to_fwhm
         fwhm_y_su = xr.DataArray(fwhm_y, dims='fwhm_y')/apparent_sun_diameter
         fwhm_y_su.coords['fwhm_y'] = fwhm_y
-        sigma_y_su = fwhm_y_su/sigma_to_fwhm
-        gaussian = np.exp(-lx**2/(2*sigma_x_su**2)-ly**2/(2*sigma_y_su**2))
-        gaussian=gaussian/gaussian.sum(('lx', 'ly'))  # normalize to 1
+        # antenna_pattern = xr.apply_ufunc(gaussian, lx, ly, fwhm_x_su, fwhm_y_su)
+        antenna_pattern = xr.apply_ufunc(bessel, lx, ly, fwhm_x_su, fwhm_y_su)
+        antenna_pattern=antenna_pattern/antenna_pattern.sum(('lx', 'ly'))  # normalize to 1
         # convolve sun and beam
-        def convolve_2d(gauss, sun):
-            return convolve(gauss, sun, mode='constant', cval=0.0)
-        lut = xr.apply_ufunc(convolve_2d, gaussian, sun, input_core_dims=[['lx', 'ly'], [
+        def convolve_2d(antenna, sun):
+            return convolve(antenna, sun, mode='constant', cval=0.0)
+        lut = xr.apply_ufunc(convolve_2d, antenna_pattern, sun, input_core_dims=[['lx', 'ly'], [
                             'sx', 'sy']], output_core_dims=[['lx', 'ly']], vectorize=True)
         lut.lx.attrs['units'] = 'sun diameter'
         lut.lx.attrs['description'] = 'Cross Elevation distance in beam centered coordinates'
@@ -98,6 +94,7 @@ class LookupTable:
         lut.fwhm_y.attrs['units'] = 'degrees'
         lut.fwhm_y.attrs['description'] = 'FWHM of the beam in co elevation direction'
         lut.attrs['version'] = LUT_VERSION
+        lut=lut.sortby(['lx', 'ly', 'fwhm_x', 'fwhm_y', 'limb_darkening'])
         logger.info('Lookup table size: %.2f GB', lut.nbytes/1024**3)
         return lut
 

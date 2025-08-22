@@ -15,9 +15,9 @@ class TestLookupTable:
         da=LookupTable.calculate_new(2,2, fwhm_x=[0.01], fwhm_y=[0.01])
         # for an apparent sun diameter of 10, we would expect 0 outside of the sun disk (lx>5) and 1 inside (lx<5)
         lut=LookupTable(da, apparent_sun_diameter=10)
-        np.testing.assert_allclose(lut.lookup(lx=0, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 1.0)
-        np.testing.assert_allclose(lut.lookup(lx=4.5, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 1.0, atol=1e-5)
-        np.testing.assert_allclose(lut.lookup(lx=5.5, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 0.0, atol=1e-5)
+        np.testing.assert_allclose(lut.lookup(lx=0, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 1.0, atol=1e-2)
+        np.testing.assert_allclose(lut.lookup(lx=4.0, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 1.0, atol=3e-2)
+        np.testing.assert_allclose(lut.lookup(lx=6.0, ly=0, fwhm_x=0.01, fwhm_y=0.01, limb_darkening=1.0).item(), 0.0, atol=3e-2)
 
 def test_beam_unitvectors_orientation():
     beam_azi=0.0

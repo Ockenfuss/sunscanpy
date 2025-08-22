@@ -3,6 +3,7 @@ import numpy as np
 import xarray as xr
 import warnings
 from scipy.spatial.distance import euclidean
+from scipy.special import j1
 
 def rmse(values):
     """
@@ -281,3 +282,22 @@ def geometric_slerp(
         return _geometric_slerp(start,
                                 end,
                                 t)
+
+def bessel(x,y, fwhm_x, fwhm_y):
+    x0 = fwhm_x/2 / 1.6163399483120884 # for r= 1.6163399483120884, the bessel function is 0.5
+    y0= fwhm_y/2 / 1.6163399483120884 #here, we make sure this is the case at fwhm/2
+    r=np.sqrt((x/x0)**2 + (y/y0)**2)
+    # Handle division by zero at r=0
+    G = np.ones_like(r)
+    nonzero = r != 0
+    G[nonzero] = (2 * j1(r[nonzero]) / (r[nonzero]))**2
+    return G
+
+def gaussian(x, y, fwhm_x, fwhm_y):
+    # FWHM = Full width half maximum
+    # FWHM = 2.355 * sigma
+    sigma_to_fwhm = 2*np.sqrt(2*np.log(2))
+    sigma_x= fwhm_x / sigma_to_fwhm
+    sigma_y= fwhm_y / sigma_to_fwhm
+    G = np.exp(-x**2 / (2 * sigma_x**2) - y**2 / (2 * sigma_y**2))
+    return G
