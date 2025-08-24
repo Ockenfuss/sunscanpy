@@ -23,9 +23,6 @@ def test_beam_unitvectors_orientation():
     beam_azi=0.0
     beam_elv=0.0
     bx, by, bz= get_beamcentered_unitvectors(beam_azi, beam_elv)
-    bx = bx.squeeze().values
-    by = by.squeeze().values
-    bz = bz.squeeze().values
     # For azimuth=0, elevation=0, the anchor point is at (1, 0, 0)
     # (remember: in world coordinates, x points north and y points east)
     # The beam coordinate system at this point should be:
@@ -39,14 +36,12 @@ def test_beam_unitvectors_orientation():
 
 
 def test_world_to_beam_matrix_identity():
-    anchor_azi = np.array([0.0])
-    anchor_elv = np.array([0.0])
+    anchor_azi = 0.0
+    anchor_elv = 0.0
     
     # Get the transformation matrix
-    transform_matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
+    matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
     
-    # Convert to numpy for easier testing (squeeze to remove sample dimension)
-    matrix = transform_matrix.squeeze().values
     # see test_beam_unitvectors_orientation for the expected values
     expected = np.array([[0., 1., 0.],
                         [0., 0., 1.],
@@ -58,11 +53,10 @@ def test_world_to_beam_matrix_identity():
 
 def test_world_to_beam_matrix_orthogonal():
     """Test that the transformation matrix is orthogonal (columns are orthonormal)."""
-    anchor_azi = np.array([45])  # 45 degrees
-    anchor_elv = np.array([30])  # 30 degrees
+    anchor_azi = 45  # 45 degrees
+    anchor_elv = 30  # 30 degrees
     
-    transform_matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
-    matrix = transform_matrix.squeeze().transpose('row', 'col', ...).values
+    matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
     
     # Check that matrix is orthogonal: M @ M.T should be identity
     should_be_identity = matrix @ matrix.T
@@ -76,11 +70,10 @@ def test_world_to_beam_matrix_orthogonal():
 
 def test_world_to_beam_matrix_north_pole():
     """Test transformation matrix at the north pole (elevation = 90 degrees)."""
-    anchor_azi = np.array([0.0])
-    anchor_elv = np.array([90])
+    anchor_azi = 0.0
+    anchor_elv = 90
     
-    transform_matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
-    matrix = transform_matrix.squeeze().values
+    matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
     
     # At the north pole, the z-axis (world up) should become the local z-axis
     # The local z-axis should point towards (0, 0, 1)
@@ -105,8 +98,7 @@ def test_world_to_beam_matrix_orthogonality_determinant():
     ]
     
     for anchor_azi, anchor_elv in test_positions:
-        transform_matrix = get_world_to_beam_matrix(np.array([anchor_azi]), np.array([anchor_elv]))
-        matrix = transform_matrix.squeeze().values
+        matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
         
         # Check orthogonality
         should_be_identity = matrix @ matrix.T
@@ -119,20 +111,6 @@ def test_world_to_beam_matrix_orthogonality_determinant():
                                  err_msg=f"Failed determinant test at azi={anchor_azi}, elv={anchor_elv}")
 
 
-def test_world_to_beam_matrix_xarray_input():
-    """Test that the function works with xarray inputs."""
-    anchor_azi = xr.DataArray([0.0, np.pi/4], dims='sample')
-    anchor_elv = xr.DataArray([0.0, np.pi/6], dims='sample')
-    
-    # This should work without raising an error
-    transform_matrix = get_world_to_beam_matrix(anchor_azi, anchor_elv)
-    
-    # Check that result has the expected dimensions
-    assert 'row' in transform_matrix.dims
-    assert 'col' in transform_matrix.dims
-    assert transform_matrix.sizes['row'] == 3
-    assert transform_matrix.sizes['col'] == 3
-
 def test_beam_differences():
     """ Test that one degree difference in azimuth or elevation results in about 1 unit difference in beam coordinates. """
     azi_beam, elv_beam = 123, 0 #1:1 correspondence in azimuth only works at the horizon
@@ -140,7 +118,6 @@ def test_beam_differences():
     elv_diff = np.linspace(-0.1, 0.1, 10)
     azi_sun, elv_sun = azi_beam + azi_diff, elv_beam + elv_diff
     azi_beam, elv_beam = azi_beam + 0*azi_diff, elv_beam + 0*elv_diff
-    beam_coords=get_beamcentered_coords(azi_beam, elv_beam, azi_sun, elv_sun)
-    azi_bc, elv_bc=beam_coords.isel(row=0).values, beam_coords.isel(row=1).values
+    azi_bc, elv_bc=get_beamcentered_coords(azi_beam, elv_beam, azi_sun, elv_sun)
     np.testing.assert_allclose(azi_diff, azi_bc, atol=1e-4)
     np.testing.assert_allclose(elv_diff, elv_bc, atol=1e-4)

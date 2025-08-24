@@ -12,11 +12,11 @@ from sunscan.utils import logger
 from sunscan.math_utils import spherical_to_xyz, rmse, bessel, gaussian
 from sunscan.scanner import IdentityScanner, BacklashScanner
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force
-from sunscan.utils import guess_offsets, format_input_xarray, db_to_linear, linear_to_db
+from sunscan.utils import guess_offsets, db_to_linear, linear_to_db
 from sunscan.params import SUNSIM_PARAMETER_MAP, sc_params
 
 identity_scanner = IdentityScanner()
-LUT_VERSION='3.1'
+LUT_VERSION='3.2'
 
 class LookupTable:
     def __init__(self, dataarray, apparent_sun_diameter):
@@ -25,7 +25,7 @@ class LookupTable:
 
     @staticmethod
     def _from_file(filepath):
-        da = xr.open_dataarray(filepath).load()
+        da = xr.open_dataarray(filepath)#.load() #somehow, load makes the interpolation much slower?!
         version= da.attrs.get('version', None)
         return da, version
     
@@ -158,6 +158,11 @@ class LookupTable:
     def lookup(self, lx, ly, fwhm_x, fwhm_y, limb_darkening):
         lx_su=self.deg_to_su(lx)
         ly_su=self.deg_to_su(ly)
+        lx_su=xr.DataArray(lx_su)
+        ly_su=xr.DataArray(ly_su)
+        fwhm_x=xr.DataArray(fwhm_x)
+        fwhm_y=xr.DataArray(fwhm_y)
+        limb_darkening=xr.DataArray(limb_darkening)
         # sun_contribution=lut.sel(lx=sun_pos_local.sel(row=0), ly=sun_pos_local.sel(row=1), fwhm_x=fwhm_x, fwhm_y=fwhm_y, method='nearest')
         # sun_contribution = self.lut.interp(lx=tangential_coordinates.sel(row=0), ly=tangential_coordinates.sel(
         #     row=1), fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
@@ -176,41 +181,67 @@ class LookupTable:
         return valid
 
 
-
 def get_beamcentered_unitvectors(azi_beam, elv_beam):
-    """Matrix to convert from cartesian world coordinates to cartesian coordinates in the tangential plane, 
-    anchored at the given position on the unit sphere."""
-    azi_beam = format_input_xarray(azi_beam)
-    elv_beam = format_input_xarray(elv_beam)
-    bz = xr.concat(spherical_to_xyz(azi_beam, elv_beam), dim='row')
-    world_ze= xr.zeros_like(bz)
-    world_ze[{'row': 2}] = 1.0
-    # x: cross-elevation axis
-    bx=xr.cross(world_ze, bz, dim='row')
-    # normalize
-    bx = bx / xr.apply_ufunc(np.linalg.norm, bx, input_core_dims=[['row']], kwargs={'axis': -1})
-    # y: co-elevation axis
-    by=xr.cross(bz, bx, dim='row')
+    """Matrix to convert from cartesian world coordinates to cartesian coordinates 
+    in the tangential plane, anchored at the given position on the unit sphere."""
+    # Convert to numpy arrays if needed
+    azi_beam = np.asarray(azi_beam)
+    elv_beam = np.asarray(elv_beam)
+    
+    # Get beam direction vector (bz)
+    bz = np.array(spherical_to_xyz(azi_beam, elv_beam))  # shape: (3, ...)
+    
+    # World z-axis vector
+    world_ze = np.zeros_like(bz)
+    world_ze[2] = 1.0
+    
+    # x: cross-elevation axis (cross product of world_ze and bz)
+    bx = np.cross(world_ze, bz, axis=0)
+    
+    # Normalize bx
+    bx_norm = np.linalg.norm(bx, axis=0, keepdims=True)
+    bx = bx / bx_norm
+    
+    # y: co-elevation axis (cross product of bz and bx)
+    by = np.cross(bz, bx, axis=0)
+    
     return bx, by, bz
 
 def get_world_to_beam_matrix(azi_beam, elv_beam):
-    # stacking those vectors in columns would give the local to world transformation matrix
-    # stacking them in rows gives the world to local transformation matrix
-    # therefore, we need to transpose the matrix. This can be done by renaming row to col for each vector
+    """Get transformation matrix from world to beam coordinates."""
     bx, by, bz = get_beamcentered_unitvectors(azi_beam, elv_beam)
-    world_to_beam=xr.concat([l.rename(row='col') for l in [bx, by, bz]], dim='row')
+    
+    # Stack the unit vectors as rows to create the transformation matrix world to local
+    # Shape will be (3, 3, ...) where the first dimension is row, second is column
+    world_to_beam = np.stack([bx, by, bz], axis=0)
+    
     return world_to_beam
 
 def get_beamcentered_coords(azi_beam, elv_beam, azi_sun, elv_sun):
-    azi_sun = format_input_xarray(azi_sun)
-    elv_sun = format_input_xarray(elv_sun)
-    # phi_sun, theta_sun = _azi_elv_to_theta_phi(data_azi), data_elv))
-    sun_distance = 360/(2*np.pi)  # this way, 1deg sun offset is roughly 1 unit in the local coordinate system
-    # sun_positions = xr.concat(_phitheta_to_cartesian(phi_sun, theta_sun, sun_distance), dim='col')
-    positions = sun_distance* xr.concat(spherical_to_xyz(azi_sun, elv_sun), dim='col')
-    world_to_beam= get_world_to_beam_matrix(azi_beam, elv_beam)
-    sun_pos_beam = (world_to_beam*positions).sum(dim='col')
-    return sun_pos_beam
+    """Get beam-centered coordinates of the sun."""
+    # Convert to numpy arrays
+    azi_sun = np.asarray(azi_sun)
+    elv_sun = np.asarray(elv_sun)
+    
+    # Distance scaling factor
+    sun_distance = 360 / (2 * np.pi)  # this way, 1deg sun offset is roughly 1 unit in the local coordinate system
+    
+    # Get sun position in world coordinates
+    sun_xyz = np.array(spherical_to_xyz(azi_sun, elv_sun))  # shape: (3, ...)
+    positions = sun_distance * sun_xyz
+    
+    # Get transformation matrix
+    world_to_beam = get_world_to_beam_matrix(azi_beam, elv_beam)
+    
+    # Transform sun position to beam coordinates
+    # Use einsum for matrix multiplication: 'ij...,j...->i...'
+    sun_pos_beam = np.einsum('ij...,j...->i...', world_to_beam, positions)
+    
+    # Extract x and y components (first two rows)
+    bx = sun_pos_beam[0]
+    by = sun_pos_beam[1]
+    
+    return bx, by
 
 class SunSimulator(object):
     def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut: LookupTable, sky_lin, sun_lin, sky=None):
@@ -250,14 +281,14 @@ class SunSimulator(object):
             f"Sky Noise: {self.sky_lin:.4f} [lin. units]\n" + \
             f"Sun Brightness: {self.sun_lin:.4f} [lin. units]\n"
     
-    def get_sunpos_tangential(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
+    def get_sunpos_beamcentered(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
         beam_azi, beam_elv = self.local_scanner.forward(gamma, omega, gammav=gammav, omegav=omegav)
-        sunpos_tangential = get_beamcentered_coords(beam_azi, beam_elv, sun_azi, sun_elv)
-        return sunpos_tangential
+        bx, by = get_beamcentered_coords(beam_azi, beam_elv, sun_azi, sun_elv)
+        return bx, by
 
     def check_within_lut(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
-        sun_pos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav=gammav, omegav=omegav)
-        valid=self.lut.check_within_lut(sun_pos_tangential.sel(row=0), sun_pos_tangential.sel(row=1))
+        lx, ly = self.get_sunpos_beamcentered(gamma, omega, sun_azi, sun_elv, gammav=gammav, omegav=omegav)
+        valid=self.lut.check_within_lut(lx, ly)
         return valid
     
     def signal_from_bc_coords(self, lx, ly):
@@ -269,8 +300,7 @@ class SunSimulator(object):
         # get the tangential coordinates of the sun position
         # Since we are not using the time in the simulation, it is possible to calculate the sun positions only once externally and save the expensive calculation in the fit every time.
         # Therefore, this version of forward exists, which takes the sun position as input.
-        sunpos_tangential = self.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
-        lx, ly=sunpos_tangential.sel(row=0), sunpos_tangential.sel(row=1)
+        lx, ly = self.get_sunpos_beamcentered(gamma, omega, sun_azi, sun_elv, gammav, omegav)
         sun_sim_lin = self.signal_from_bc_coords(lx, ly)
         return sun_sim_lin.values
     
@@ -380,28 +410,21 @@ class SunSimulationEstimator(object):
             if params_guess['domega'] is None:
                 params_guess['domega'] = domega_guess
 
-        gamma_xr= xr.DataArray(gamma, dims='sample')
-        omega_xr= xr.DataArray(omega, dims='sample')
-        time_xr= xr.DataArray(time, dims='sample')
-        signal_lin_xr= xr.DataArray(signal_lin, dims='sample')
-        gammav_xr= xr.DataArray(gammav, dims='sample')
-        omegav_xr= xr.DataArray(omegav, dims='sample')
-        sun_azi, sun_elv = xr.apply_ufunc(self.sky.compute_sun_location, time_xr, output_core_dims=[[],[]])
+        sun_azi, sun_elv = self.sky.compute_sun_location(t=time)
         # check that with the initial guess, the relative difference between sun and scanner is within the lookup table
         init_simulator= SunSimulator(**params_guess, lut=lut, sky=self.sky, sky_lin=sky_lin, sun_lin=self.sun_lin)
-        valid=init_simulator.check_within_lut(gamma_xr, omega_xr, sun_azi, sun_elv, gammav_xr, omegav_xr)
+        valid=init_simulator.check_within_lut(gamma, omega, sun_azi, sun_elv, gammav, omegav)
         if not valid.all():
             logger.warning(f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
-            gamma_xr= gamma_xr.where(valid, drop=True)
-            omega_xr= omega_xr.where(valid, drop=True)
-            signal_lin_xr= signal_lin_xr.where(valid, drop=True)
-            gammav_xr= gammav_xr.where(valid, drop=True)
-            omegav_xr= omegav_xr.where(valid, drop=True)
-            time_xr= time_xr.where(valid, drop=True)
-            sun_azi= sun_azi.where(valid, drop=True)
-            sun_elv= sun_elv.where(valid, drop=True)
-        
-        optimize_args = (gamma_xr, omega_xr, sun_azi, sun_elv, signal_lin_xr, gammav_xr, omegav_xr, lut, sky_lin, self.sun_lin)
+            gamma=gamma[valid]
+            omega=omega[valid]
+            time=time[valid]
+            signal_lin=signal_lin[valid]
+            gammav=gammav[valid]
+            omegav=omegav[valid]
+            sun_azi=sun_azi[valid]
+            sun_elv=sun_elv[valid]
+        optimize_args = (gamma, omega, sun_azi, sun_elv, signal_lin, gammav, omegav, lut, sky_lin, self.sun_lin)
         params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SUNSIM_PARAMETER_MAP)
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         if brute_force:

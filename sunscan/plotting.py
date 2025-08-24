@@ -21,9 +21,7 @@ def _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, sun_signal, ax, vmin=
 def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_db, gammav, omegav, sky, remove_outliers=False):
     sun_azi, sun_elv=sky.compute_sun_location(time)
     sun_azi, sun_elv = np.asarray(sun_azi), np.asarray(sun_elv)
-    sun_pos_bc = simulator.get_sunpos_tangential(gamma, omega, sun_azi, sun_elv, gammav, omegav)
-    sun_pos_bc_x= sun_pos_bc.sel(row=0).values
-    sun_pos_bc_y= sun_pos_bc.sel(row=1).values
+    sun_pos_bc_x, sun_pos_bc_y = simulator.get_sunpos_beamcentered(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     if remove_outliers:
         x_std= np.std(sun_pos_bc_x)
         x_mean= np.mean(sun_pos_bc_x)
