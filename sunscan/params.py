@@ -27,8 +27,8 @@ SUNSIM_PARAMETER_MAP = {
 
 sc_params={
     "lutpath": _get_default_lut_path(),
-    "lut_dgamma_range": 2,
-    "lut_domega_range": 2,
+    "lut_dgamma_range": 3,
+    "lut_domega_range": 3,
     "lut_fwhm_x": [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     "lut_fwhm_y": [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     "lut_limb_darkening": [1.0],#[0.95, 0.975, 1.0],

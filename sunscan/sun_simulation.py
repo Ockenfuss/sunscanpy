@@ -172,7 +172,7 @@ class LookupTable:
         py_su= self.deg_to_su(py)
         lxmin, lxmax = self.lut.lx.min().item(), self.lut.lx.max().item()
         lymin, lymax = self.lut.ly.min().item(), self.lut.ly.max().item()
-        valid = (px > lxmin) & (px < lxmax) & (py > lymin) & (py < lymax)
+        valid = (px_su > lxmin) & (px_su < lxmax) & (py_su > lymin) & (py_su < lymax)
         return valid
 
 
