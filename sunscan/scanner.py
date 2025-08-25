@@ -5,9 +5,9 @@ from ikpy.link import OriginLink, URDFLink
 from sunscan.math_utils import spherical_to_cartesian, calc_azi_diff
 from sunscan.params import SCANNER_PARAMETER_MAP
 import warnings
+import yaml
 
-
-
+SCANNER_FILE_VERSION="1.0"
 
 class Scanner(object):
     """Base class for scanner models."""
@@ -165,24 +165,37 @@ def generate_pt_chain(alpha, delta, beta, epsilon, omega_bounds=None):
     )
     return pt_chain
 
-def _vector_to_azielv(z_axis, x_axis=None, eps=1e-8):
+def _vector_to_azielv(z_axis, x_axis, eps=1e-8):
     """
-    Calculates azimuth and elevation from a direction vector.
-    If the z axis is vertical (x and y near zero), uses the x axis for azimuth.
-    Returns azimuth (degrees), elevation (degrees)
+    Calculates azimuth and elevation from direction vectors.
+    If any z axis is vertical (x and y near zero), uses the corresponding x axis for azimuth.
+    
+    Args:
+        z_axis: array of shape (3, ...) with direction vectors
+        x_axis: array of shape (3, ...) with x-axis vectors
+        eps: tolerance for determining if z_axis is vertical
+    
+    Returns:
+        azimuth (degrees), elevation (degrees) - arrays matching the input shape
     """
     z_axis = np.asarray(z_axis)
-    # Elevation: angle from xy-plane
-    elv = np.arcsin(z_axis[2] / np.linalg.norm(z_axis))
-    # Azimuth: angle in xy-plane from x-axis
-    if np.abs(z_axis[0]) < eps and np.abs(z_axis[1]) < eps:
-        # z axis is vertical, use x axis for azimuth
-        if x_axis is None:
-            raise ValueError("x_axis must be provided when z_axis is vertical")
-        x_axis = np.asarray(x_axis)
-        azi = np.arctan2(x_axis[1], x_axis[0])
-    else:
-        azi = np.arctan2(z_axis[1], z_axis[0])
+    x_axis = np.asarray(x_axis)
+    
+    # Calculate norms and elevation
+    norms = np.linalg.norm(z_axis, axis=0)
+    elv = np.arcsin(z_axis[2] / norms)
+    
+    # Check which vectors are vertical (x and y components near zero)
+    is_vertical = (np.abs(z_axis[0]) < eps) & (np.abs(z_axis[1]) < eps)
+    
+    # Calculate azimuth from z_axis
+    azi = np.arctan2(z_axis[1], z_axis[0])
+    
+    # For vertical vectors, use x_axis for azimuth
+    azi_from_x = np.arctan2(x_axis[1], x_axis[0])
+    azi = np.where(is_vertical, azi_from_x, azi)
+    
+    # Convert to degrees
     return np.rad2deg(azi), np.rad2deg(elv)
 
 def _gam_om_to_joint(gamma, omega):
@@ -221,6 +234,25 @@ class GeneralScanner(Scanner):
         self.epsilon = epsilon
         self.backlash_scanner= BacklashScanner(dtime=dtime, backlash_gamma=backlash_gamma, gamma_offset=gamma_offset, omega_offset=omega_offset, flex=flex)
         self.chain = generate_pt_chain(alpha, delta, beta, epsilon)
+
+    @classmethod
+    def load(cls, filename):
+        """Load scanner parameters from a YAML file."""
+        with open(filename, 'r') as f:
+            params = yaml.safe_load(f)
+        file_version = params.get('file_version', 'nan')
+        if file_version != SCANNER_FILE_VERSION:
+            warnings.warn(f"Scanner file version {file_version} does not match expected version {SCANNER_FILE_VERSION}.")
+        return cls(gamma_offset=params['gamma_offset'],
+                     omega_offset=params['omega_offset'],
+                     alpha=params['alpha'],
+                     delta=params['delta'],
+                     beta=params['beta'],
+                     epsilon=params['epsilon'],
+                     dtime=params['dtime'],
+                     backlash_gamma=params['backlash_gamma'],
+                     flex=params['flex']
+        )
     
     def _get_joint_positions(self, gamma, omega, gammav=0, omegav=0):
         gamma, omega = self.backlash_scanner.apply_offsets(gamma, omega, gammav, omegav)
@@ -232,38 +264,39 @@ class GeneralScanner(Scanner):
         gamma, omega = self.backlash_scanner.remove_offsets(gamma, omega, gammav, omegav)
         return gamma, omega
     
+    def forward_unitvectors(self, gamma, omega, gammav=0, omegav=0):
+        """Calculate the unit vectors of the system at the end of the chain."""
+        gamma= np.atleast_1d(gamma)
+        omega= np.atleast_1d(omega)
+        positions= self._get_joint_positions(gamma, omega, gammav, omegav)
+        radar_pointing=np.array([self.chain.forward_kinematics(pos)[:3, :3] for pos in positions]) # shape (N, 3, 3), where the last axis containes the x,y,z unit vectors
+        # move N to the last axis
+        radar_pointing=np.moveaxis(radar_pointing, 0, -1)
+        x_axis=radar_pointing[:, 0, :]
+        y_axis=radar_pointing[:, 1, :]
+        z_axis=radar_pointing[:, 2, :]
+
+        # remove singleton dimensions
+        if x_axis.shape[1] == 1:
+            x_axis=x_axis[:, 0]
+            y_axis=y_axis[:, 0]
+            z_axis=z_axis[:, 0]
+        return x_axis, y_axis, z_axis
+
     def forward_pointing(self, gamma, omega, gammav=0, omegav=0):
         """Calculate the pointing of the radar, i.e. the direction of the z-axis of the last link in the chain.
 
         Returns:
             np.ndarray: Array of shape (N, 3) with the pointing direction vectors.
         """
-        gamma= np.atleast_1d(gamma)
-        omega= np.atleast_1d(omega)
-        positions= self._get_joint_positions(gamma, omega, gammav, omegav)
-        radar_pointing=[self.chain.forward_kinematics(pos)[:3, 2] for pos in positions]
-        if len(radar_pointing) == 1:
-            radar_pointing = radar_pointing[0]
-        return np.array(radar_pointing)
-
+        ex, ey, ez = self.forward_unitvectors(gamma, omega, gammav, omegav)
+        return ez
+    
 
     def forward(self, gamma, omega, gammav=0, omegav=0):
-        gamma= np.atleast_1d(gamma)
-        omega= np.atleast_1d(omega)
-        azi_list=[]
-        elv_list=[]
-        for pos in self._get_joint_positions(gamma, omega, gammav, omegav):
-            trans_matrix=self.chain.forward_kinematics(pos)[:3, :3]
-            z_axis=trans_matrix[:, 2]
-            x_axis=trans_matrix[:, 0]
-            azi, elv = _vector_to_azielv(z_axis, x_axis)
-            azi_list.append(azi)
-            elv_list.append(elv)
-        if len(azi_list) > 1:
-            azi_list, elv_list = np.array(azi_list), np.array(elv_list)
-        else:
-            azi_list, elv_list = azi_list[0], elv_list[0]
-        return azi_list%360, elv_list
+        x_axis, y_axis, z_axis = self.forward_unitvectors(gamma, omega, gammav, omegav)
+        azi, elv= _vector_to_azielv(z_axis, x_axis)
+        return azi%360, elv
     
     def _create_bounded_chain_copy(self, omega_bounds):
         chain=generate_pt_chain(self.alpha, self.delta, self.beta, self.epsilon, omega_bounds=omega_bounds)
@@ -303,7 +336,7 @@ class GeneralScanner(Scanner):
     def get_params(self, complete=False):
         """Get the parameters of the scanner as a dictionary."""
         backlash_params = self.backlash_scanner.get_params()
-        return {
+        params = {
             'gamma_offset': self.backlash_scanner.gamma_offset,
             'omega_offset': self.backlash_scanner.omega_offset,
             'alpha': self.alpha,
@@ -314,6 +347,8 @@ class GeneralScanner(Scanner):
             'backlash_gamma': backlash_params['backlash_gamma'],
             'flex': backlash_params['flex']
         }
+        params={k:float(v) for k,v in params.items()}
+        return params
     
     def __repr__(self):
         return "General Scanner Model:\n" + \
@@ -326,5 +361,12 @@ class GeneralScanner(Scanner):
                f"Time Offset: {self.backlash_scanner.dtime:.4f} s\n" + \
                f"Azimuth Backlash: {self.backlash_scanner.backlash_gamma:.4f} º\n" + \
                f"Flex: {self.backlash_scanner.flex:.4f} º at 0 elevation"
+    
+    def save(self, filename):
+        """Save the scanner parameters to a YAML file."""
+        params = self.get_params(complete=True)
+        params['file_version'] = SCANNER_FILE_VERSION
+        with open(filename, 'w') as f:
+            yaml.dump(params, f)
 
     
