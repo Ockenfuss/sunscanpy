@@ -153,7 +153,7 @@ class TestBacklashScanner:
         np.testing.assert_allclose(gamma_result, gamma, rtol=1e-10, atol=1e-10)
         np.testing.assert_allclose(omega_result, omega, rtol=1e-10, atol=1e-10)
 
-class TestGeneralScanner:
+class TestGeneralScannerInverse:
     @pytest.mark.parametrize("azi,elv", [
         (0, 30),
         (90, 45),
@@ -204,9 +204,33 @@ class TestGeneralScanner:
                 # No warning expected, check closeness
                 np.testing.assert_allclose(calc_azi_diff(azi_check, azi), 0, atol=0.2)
                 np.testing.assert_allclose(elv_check, elv, atol=0.2)
+    
+    def test_inverse_array_inputs(self):
+        scanner = GeneralScanner(
+            gamma_offset=1.0,
+            omega_offset=-1.0,
+            alpha=2.0,
+            delta=-2.0,
+            beta=1.0,
+            epsilon=5.0,
+            dtime=0.0,
+            backlash_gamma=0.0,
+            flex=0.0
+        )
+        # Create a grid of test points
+        gamma=np.array([0, 45, 90, 135, 180])
+        omega=np.array([10, 30, 60, 70, 80])
+        
+        # Forward transform to get azi/elv
+        azi, elv = scanner.forward(gamma, omega, gammav=0, omegav=0)
+        
+        # Inverse transform
+        gamma_result, omega_result = scanner.inverse(azi, elv, gammav=0, omegav=0, reverse=False)
+        
+        # Check that we get back the original values
+        np.testing.assert_allclose(gamma_result, gamma, atol=1e-5)
+        np.testing.assert_allclose(omega_result, omega, atol=1e-5)
 
-#%%
-        #%%
 class TestGeneralScannerForward:
     def make_scanner(self, **params):
         default_params={

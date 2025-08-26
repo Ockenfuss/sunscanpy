@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sunscan.scanner import IdentityScanner, BacklashScanner
-from sunscan.math_utils import geometric_slerp, spherical_to_cartesian, cartesian_to_spherical
+from sunscan.math_utils import geometric_slerp, spherical_to_xyz, cartesian_to_spherical
 from sunscan.sun_simulation import SunSimulator
 from sunscan.utils import db_to_linear, linear_to_db
 
@@ -148,7 +148,7 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_d
 
 
 def _plot_fitting_points(ax, beam_azi, beam_elv, scanner_azi, scanner_elv, reverse, enhancement=1.0, plot_connectors=True):
-    extrapolated=[geometric_slerp(spherical_to_cartesian(beam_azi[i], beam_elv[i]), spherical_to_cartesian(scanner_azi[i], scanner_elv[i]), enhancement) for i in range(len(beam_azi))]
+    extrapolated=[geometric_slerp(spherical_to_xyz(beam_azi[i], beam_elv[i]), spherical_to_xyz(scanner_azi[i], scanner_elv[i]), enhancement) for i in range(len(beam_azi))]
     ext_azi, ext_elv=cartesian_to_spherical(np.array(extrapolated))
 
     art1=ax.scatter(np.deg2rad(beam_azi), beam_elv, color='blue', marker='o', s=5)

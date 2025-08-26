@@ -2,7 +2,7 @@ import xarray as xr
 import numpy as np
 from ikpy.chain import Chain
 from ikpy.link import OriginLink, URDFLink
-from sunscan.math_utils import spherical_to_cartesian, calc_azi_diff
+from sunscan.math_utils import spherical_to_xyz, calc_azi_diff
 from sunscan.params import SCANNER_PARAMETER_MAP
 import warnings
 import yaml
@@ -40,7 +40,7 @@ class IdentityScanner(Scanner):
         return azi%360, elv
     
     def forward_pointing(self, gamma, omega, gammav=None, omegav=None):
-        return spherical_to_cartesian(*self.forward(gamma, omega))
+        return spherical_to_xyz(*self.forward(gamma, omega))
 
     def inverse(self, azi, elv, reverse=False):
         """Invert the identity radar model.
@@ -212,7 +212,7 @@ def _joint_to_gam_om(j1, j2):
 def _gam_om_to_joint_list(gamma, omega):
     """ gamma (azimuth) and omega (elevation) in degrees"""
     j1, j2= _gam_om_to_joint(gamma, omega)
-    positions=np.zeros((len(gamma), 4))
+    positions=np.zeros((len(gamma), 4)) # shape (N, 4)
     positions[:, 1] = j1
     positions[:, 2] = j2
     return positions
@@ -305,6 +305,10 @@ class GeneralScanner(Scanner):
     def inverse(self, azi, elv, gammav=0, omegav=0, reverse=None):
         azi= np.atleast_1d(azi)
         elv= np.atleast_1d(elv)
+        if len(azi) != len(elv):
+            raise ValueError("azi and elv must have the same length.")
+        if azi.ndim != 1 or elv.ndim != 1:
+            raise ValueError("azi and elv must be 1D arrays or scalars.")
         if reverse is None:
             chain = self.chain
         else:
@@ -316,10 +320,10 @@ class GeneralScanner(Scanner):
             chain = self._create_bounded_chain_copy(omega_bounds=omega_bounds)
         reverse_guess = False if reverse is None else reverse
         positions=[]
-        target_vector= spherical_to_cartesian(azi,elv)
+        target_vectors= np.array(spherical_to_xyz(azi,elv)).T # shape (3, N) -> (N, 3) after transpose
         gamma_guess, omega_guess = self.backlash_scanner.inverse(azi, elv, gammav=gammav, omegav=omegav, reverse=reverse_guess)
         initial_positions=_gam_om_to_joint_list(gamma_guess, omega_guess)
-        for initial_pos in initial_positions:
+        for initial_pos, target_vector in zip(initial_positions, target_vectors):
             # calculate the orientation vector
             pos=chain.inverse_kinematics(target_orientation=target_vector, orientation_mode='Z', initial_position=initial_pos)
             positions.append(pos)

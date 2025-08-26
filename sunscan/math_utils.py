@@ -16,7 +16,7 @@ def difference_angles(vec1, vec2):
     Calculate the difference in angles between two vectors.
     Returns the angle in radians.
     """
-    dot_product = (vec1 * vec2).sum(axis=-1)
+    dot_product = (vec1 * vec2).sum(axis=0)
     dot_product=np.clip(dot_product, -1.0, 1.0)
     angle = np.arccos(dot_product)
     return np.rad2deg(angle)
@@ -49,12 +49,6 @@ def spherical_to_xyz(azi, elv):
     y = np.cos(elv_rad) * np.sin(azi_rad)
     z = np.sin(elv_rad)
     return x, y, z
-
-def spherical_to_cartesian(azi, elv):
-    x,y,z= spherical_to_xyz(azi, elv)
-    # Stack as (N, 3) array of unit vectors
-    unit_vectors = np.stack((x, y, z), axis=-1)
-    return unit_vectors
 
 def _geometric_slerp(start, end, t):
     # create an orthogonal basis using QR decomposition
