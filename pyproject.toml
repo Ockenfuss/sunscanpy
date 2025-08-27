@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sunscan"
-version = "0.1.0"
+name = "sunscanpy"
+version = "0.0.0"
 description = "A python module for radar pointing calibration using the sun"
 readme = "README.md"
 authors = [
@@ -13,14 +13,12 @@ authors = [
 ]
 license = {text = "MIT"}
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
 ]
+keywords = ["radar", "calibration", "sun", "atmosphere", "doppler", "cloud", "weather"]
 requires-python = ">=3.8"
 dependencies = [
     "numpy>=1.20",
@@ -44,9 +42,7 @@ dev = [
 ]
 
 [project.urls]
-# Homepage = "https://github.com/yourusername/sunscan"
-# Repository = "https://github.com/yourusername/sunscan"
-# Issues = "https://github.com/yourusername/sunscan/issues"
+Homepage = "https://github.com/Ockenfuss/sunscanpy"
 
 [tool.setuptools.package-data]
 sunscan = ["examples/*.nc"]

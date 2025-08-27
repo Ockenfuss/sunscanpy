@@ -1,48 +1,34 @@
-# Sunscan
+# SunscanPy
+SunscanPy - A python library to calibrate the pointing of your weather or cloud radar based on the position of the Sun!
 
+![SunscanPy Logo](assets/icons/SunscanIcon512.png)
 
 ## Description
 
 ## Installation
+```bash
+pip install sunscanpy
+```
 
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/sunscan.git
-cd sunscan
+git clone https://github.com/yourusername/sunscanpy.git
+cd sunscanpy
 pip install -e .
-```
-
-### For development
-
-```bash
-git clone https://github.com/yourusername/sunscan.git
-cd sunscan
-pip install -e ".[dev]"
 ```
 
 ## Usage
 
-```python
-import sunscan
+See the two tutorial jupyter notebooks provided in the examples subfolder.
 
-```
-
-## Features
-
-
-## Development
-Conventions:
-- all angles within `sunscan` are in degrees (except ikpy joint positions, which have to be radians)
-
-### Running Tests
-
-```bash
-```
+## Contributing
+See Contributing.md
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+SunscanPy  © 2025 by Paul Ockenfuß, Gregor Köcher, Ludwig-Maximilians Universität München is licensed under CC BY-SA 4.0. To view a copy of this license, visit https://creativecommons.org/licenses/by-sa/4.0/
+
 
 ## Authors
 
