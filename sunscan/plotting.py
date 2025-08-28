@@ -114,7 +114,8 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_d
 
     ax = ax5
     diff=signal_db-sun_sim_db
-    im = _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, diff , ax, vmin=None, vmax=None, cmap='coolwarm')
+    quantiles=np.quantile(diff, [0.02, 0.98])
+    im = _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, diff , ax, vmin=quantiles[0], vmax=quantiles[1], cmap='coolwarm')
     fig.colorbar(im, ax=ax, label='Measured - Simulated [dB]')
 
     ax = ax3
@@ -148,16 +149,16 @@ def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_d
 
 
 def _plot_fitting_points(ax, beam_azi, beam_elv, scanner_azi, scanner_elv, reverse, enhancement=1.0, plot_connectors=True):
-    extrapolated=[geometric_slerp(spherical_to_xyz(beam_azi[i], beam_elv[i]), spherical_to_xyz(scanner_azi[i], scanner_elv[i]), enhancement) for i in range(len(beam_azi))]
+    extrapolated=[geometric_slerp(spherical_to_xyz(scanner_azi[i], scanner_elv[i]), spherical_to_xyz(beam_azi[i], beam_elv[i]), enhancement) for i in range(len(beam_azi))]
     ext_azi, ext_elv=cartesian_to_spherical(np.array(extrapolated))
 
-    art1=ax.scatter(np.deg2rad(beam_azi), beam_elv, color='blue', marker='o', s=5)
+    art1=ax.scatter(np.deg2rad(scanner_azi), scanner_elv, color='blue', marker='o', s=5)
     # ax.scatter(identity_azi, identity_elv, color='red', marker='x', label='Position if identity model would be correct')
     art2=ax.scatter(np.deg2rad(ext_azi[~reverse]), ext_elv[~reverse], color='green', marker='x')
     art3=ax.scatter(np.deg2rad(ext_azi[reverse]), ext_elv[reverse], color='orange', marker='x')
     if plot_connectors:
-        for i in range(len(beam_azi)):
-            ax.plot(np.deg2rad([beam_azi[i], ext_azi[i]]), [beam_elv[i], ext_elv[i]], color='grey', linewidth=0.5, linestyle='-')
+        for i in range(len(scanner_azi)):
+            ax.plot(np.deg2rad([scanner_azi[i], ext_azi[i]]), [scanner_elv[i], ext_elv[i]], color='grey', linewidth=0.5, linestyle='-')
     ax.invert_yaxis()
     ax.set_ylabel(r"$\theta$ [degrees]", rotation=45)
     ax.yaxis.set_label_coords(0.6, 0.6)
@@ -165,6 +166,12 @@ def _plot_fitting_points(ax, beam_azi, beam_elv, scanner_azi, scanner_elv, rever
     ax.set_ylim(90,0)
     ax.set_theta_zero_location('N')
     ax.set_theta_direction(-1)
+    xticks={k: f"{k}º" for k in range(0, 360, 45)}
+    xticks[0] = 'N'
+    xticks[90] = 'E'
+    xticks[180] = 'S'
+    xticks[270] = 'W'
+    ax.set_xticks(np.deg2rad(list(xticks.keys())), labels=list(xticks.values()))
     return [art1, art2, art3]
 
 def plot_calibrated_pairs(gamma_s, omega_s, azi_beam, elv_beam, scanner_model=None, ax=None, gamma_offset=None, plot_connectors=None, enhancement=1.0):
@@ -187,9 +194,9 @@ def plot_calibrated_pairs(gamma_s, omega_s, azi_beam, elv_beam, scanner_model=No
     reverse=omega_s>90
     scanner_azi, scanner_elv= scanner_model.forward(gamma_s, omega_s, gammav=0, omegav=0)
     artists=_plot_fitting_points(_ax, azi_beam, elv_beam, scanner_azi, scanner_elv, reverse, plot_connectors=plot_connectors, enhancement=enhancement)
-    artists[0].set_label(r'Reference celestial positions $\phi_{beam}$, $\theta_{beam}$')
-    artists[1].set_label(r'Pointing calculated from $\gamma_s$, $\omega_s$')
-    artists[2].set_label(r'Reverse samples (i.e. $\omega_s > 90^\circ$)')
+    artists[0].set_label(r'Pointing from scanner position $M(\gamma_r, \omega_r)$')
+    artists[1].set_label(r'Actual pointing position $\phi_r, \theta_r$ (forward scan)')
+    artists[2].set_label(r'Actual pointing position $\phi_r, \theta_r$ (reverse scan)')
     # _ax.set_title("")
     # Create a single figure legend
     handles, labels = _ax.get_legend_handles_labels()  # Get handles and labels from one of the axes
