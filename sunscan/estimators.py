@@ -3,7 +3,7 @@ import scipy.optimize as opt
 from sunscan.utils import logger
 from sunscan.fit_utils import get_parameter_lists, optimize_brute_force
 from sunscan.scanner import GeneralScanner, IdentityScanner
-from sunscan.math_utils import spherical_to_cartesian, rmse, difference_angles
+from sunscan.math_utils import spherical_to_xyz, rmse, difference_angles
 from sunscan.utils import guess_offsets
 from sunscan.params import SCANNER_PARAMETER_MAP, sc_params
 
@@ -71,7 +71,7 @@ class ScannerEstimator(object):
                 params_guess['omega_offset'] = omoff_guess
         logger.info(f'Starting to optimize {", ".join(params_optimize)} using {len(gamma)} calibration pairs')
         params_guess_list, bounds_list= get_parameter_lists(params_optimize, params_guess, params_bounds, SCANNER_PARAMETER_MAP)
-        pointing_b=spherical_to_cartesian(azi_b, elv_b)
+        pointing_b=np.array(spherical_to_xyz(azi_b, elv_b))
         optimize_args = (gamma, omega, pointing_b)
         #%%
         if brute_force:
