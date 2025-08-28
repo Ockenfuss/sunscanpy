@@ -7,6 +7,11 @@
 
 ## Description
 
+Precise knowledge of the pointing direction is essential for weather and cloud radars. Radars with scanning capability can be calibrated using the sun as a microwave emitting target with a precisely defined position in the sky.
+SunscanPy provides tools to evaluate radar measurements of the sun, derive the mispointing of your antenna and actively correct misalignments using the scanner motors.
+
+For more information, see the two tutorial jupyter notebooks provided in the examples subfolder.
+
 ## Installation
 ```bash
 pip install sunscanpy
@@ -19,10 +24,6 @@ git clone https://github.com/yourusername/sunscanpy.git
 cd sunscanpy
 pip install -e .
 ```
-
-## Usage
-
-See the two tutorial jupyter notebooks provided in the examples subfolder.
 
 ## Contributing
 See Contributing.md
