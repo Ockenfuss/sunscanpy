@@ -2,7 +2,7 @@
 import numpy as np
 import xarray as xr
 import pytest
-from sunscan.sun_simulation import get_world_to_beam_matrix, get_beamcentered_unitvectors, LookupTable, get_beamcentered_coords
+from sunscan.signal_simulation import get_world_to_beam_matrix, get_beamcentered_unitvectors, LookupTable, get_beamcentered_coords
 #%%
 
 class TestLookupTable:

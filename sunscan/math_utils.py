@@ -26,7 +26,15 @@ def calc_azi_diff(azi1, azi2):
     diff = (azi1 - azi2 + 180) % 360 - 180
     return diff
 
-
+def difference_angles_spherical(azi1, elv1, azi2, elv2):
+    """Calculate the difference in angles between two directions given in spherical coordinates (azimuth, elevation).
+    Returns the angle in degrees.
+    """
+    x1, y1, z1 = spherical_to_xyz(azi1, elv1)
+    x2, y2, z2 = spherical_to_xyz(azi2, elv2)
+    vec1 = np.array([x1, y1, z1])
+    vec2 = np.array([x2, y2, z2])
+    return difference_angles(vec1, vec2)
 
 def cartesian_to_spherical(unit_vectors):
     """Convert unit vectors to spherical coordinates (azimuth, elevation).

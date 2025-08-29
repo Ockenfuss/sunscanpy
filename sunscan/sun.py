@@ -9,7 +9,7 @@ from skyfield import almanac
 from sunscan.utils import logger
 
 
-class SkyObject:
+class SunObject:
     """Class to compute the position of the sun and its rise/set times.
 
     This class uses the Skyfield library to calculate the sun's position based on the location of the radar.

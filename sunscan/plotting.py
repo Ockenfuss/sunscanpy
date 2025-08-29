@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sunscan.scanner import IdentityScanner, BacklashScanner
 from sunscan.math_utils import geometric_slerp, spherical_to_xyz, cartesian_to_spherical
-from sunscan.sun_simulation import SunSimulator
+from sunscan.signal_simulation import SignalSimulator
 from sunscan.utils import db_to_linear, linear_to_db
 
 def _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, sun_signal, ax, vmin=0, vmax=1, cmap='turbo'):
@@ -18,8 +18,8 @@ def _plot_points_tangent_plane(sun_pos_bc_x, sun_pos_bc_y, sun_signal, ax, vmin=
     return im
 
 
-def plot_sunscan_simulation(simulator:SunSimulator, gamma, omega, time, signal_db, gammav, omegav, sky, remove_outliers=False):
-    sun_azi, sun_elv=sky.compute_sun_location(time)
+def plot_sunscan_simulation(simulator:SignalSimulator, gamma, omega, time, signal_db, gammav, omegav, sun, remove_outliers=False):
+    sun_azi, sun_elv=sun.compute_sun_location(time)
     sun_azi, sun_elv = np.asarray(sun_azi), np.asarray(sun_elv)
     sun_pos_bc_x, sun_pos_bc_y = simulator.get_sunpos_beamcentered(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     if remove_outliers:
