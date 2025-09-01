@@ -40,6 +40,7 @@ class SunObject:
         self.ts = load.timescale()
         self.refraction = refraction_correction
         self.humidity = humidity
+        logger.info(f'Initialized SunObject with location lat: {lat}, lon: {lon}, altitude: {altitude}, refraction_correction: {refraction_correction}, humidity: {humidity}')
 
     def get_radar_location(self, lat, lon, altitude, earth):
         """Get the radar location as a Skyfield object.
@@ -145,7 +146,6 @@ class SunObject:
             numpy.array: The refractivity corrected "apparent" elevation angle(s) in degrees.
 
         """
-        logger.info('Applying refraction correction to sun elevation angles with humidity: %s', self.humidity)
         elevation = np.asarray(elevation, dtype=float)
         alpha = 0.0155 + 0.0054*self.humidity
         beta = 8
