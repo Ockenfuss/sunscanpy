@@ -19,7 +19,7 @@ class SunObject:
     Args:
         lat (float): Latitude of the radar location in degrees.
         lon (float): Longitude of the radar location in degrees.
-        elevation (float): Elevation of the radar location in meters.
+        altitude (float): Altitude of the radar location in meters.
         refraction_correction (bool): Whether to apply atmospheric refraction correction. Defaults to True.
         humidity (float): Humidity level for refraction correction. Defaults to 0.5.
 
@@ -32,22 +32,22 @@ class SunObject:
 
     """
 
-    def __init__(self, lat, lon, elevation, refraction_correction=True, humidity=0.5):
+    def __init__(self, lat, lon, altitude, refraction_correction=True, humidity=0.5):
         eph = load('de421.bsp')
         earth = eph['earth']
         self.sun = eph['sun']
-        self.location = self.get_radar_location(lat, lon, elevation, earth)
+        self.location = self.get_radar_location(lat, lon, altitude, earth)
         self.ts = load.timescale()
         self.refraction = refraction_correction
         self.humidity = humidity
 
-    def get_radar_location(self, lat, lon, elevation, earth):
+    def get_radar_location(self, lat, lon, altitude, earth):
         """Get the radar location as a Skyfield object.
 
         Args:
             lat (float): Latitude of the radar location in degrees.
             lon (float): Longitude of the radar location in degrees.
-            elevation (float): Elevation of the radar location in meters.
+            altitude (float): Altitude of the radar location in meters.
             earth (Skyfield object): The Earth object from Skyfield.
 
         Returns:
@@ -62,7 +62,7 @@ class SunObject:
             lon = lon * E
         else:
             lon = lon * W
-        return earth + wgs84.latlon(lat, lon, elevation_m=elevation)
+        return earth + wgs84.latlon(lat, lon, elevation_m=altitude)
     
     def convert_times(self, t):
         """Convert various time formats to Skyfield times."""
