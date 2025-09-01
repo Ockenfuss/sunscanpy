@@ -12,6 +12,12 @@ pytest "tests/"
 - Update whats-new.md
 - Bump versions in `pyproject.toml` and `__init__.py`
 
+## Tag commit
+```bash
+git tag -a v0.1.0 <commit-hash> -m "Initial release version 0.1.0"
+git push origin --tags
+```
+
 ## Release
 ```bash
 python3 -m build
