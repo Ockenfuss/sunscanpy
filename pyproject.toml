@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sunscanpy"
-version = "0.1.0"
+version = "0.1.1"
 description = "A python module for radar pointing calibration using the sun"
 readme = "README.md"
 authors = [
@@ -22,7 +22,7 @@ keywords = ["radar", "calibration", "sun", "atmosphere", "doppler", "cloud", "we
 requires-python = ">=3.8"
 dependencies = [
     "numpy>=1.20",
-    "xarray",
+    "xarray[accel]",
     "pandas",
     "scipy",
     "skyfield>=1.40",    
