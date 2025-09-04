@@ -20,7 +20,7 @@ pip install sunscanpy
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/sunscanpy.git
+git clone https://github.com/Ockenfuss/sunscanpy.git
 cd sunscanpy
 pip install -e .
 ```
