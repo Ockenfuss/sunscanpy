@@ -117,7 +117,7 @@ class SunObject:
         if isinstance(t, (datetime, np.datetime64)) or (isinstance(t, str) and t == 'now'):
             return sun_azis[0], sun_elvs[0]
 
-        return sun_azis, sun_elvs
+        return np.array(sun_azis), np.array(sun_elvs)
 
     def add_refraction(self, elevation):
         """Correct the true elevation angle with atmospheric refraction.
