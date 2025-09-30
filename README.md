@@ -12,6 +12,11 @@ SunscanPy provides tools to evaluate radar measurements of the sun, derive the m
 
 For more information, see the two tutorial jupyter notebooks provided in the examples subfolder.
 
+<div align="center">
+  <img src="assets/ScannerInaccuracies.png" alt="Possible Scanner Inaccuracies" width="600" height="auto">
+  <p><em>Some inaccuracies of a two axis scanner, which can be analyzed and corrected using SunscanPy</em></p>
+</div>
+
 ## Installation
 ```bash
 pip install sunscanpy
