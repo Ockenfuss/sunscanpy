@@ -3,7 +3,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from skyfield.api import load, N, S, E, W, wgs84
+from skyfield.api import load, wgs84
 from skyfield import almanac
 
 from sunscan.utils import logger
@@ -17,8 +17,8 @@ class SunObject:
     sunset times for a given date.
 
     Args:
-        lat (float): Latitude of the radar location in degrees.
-        lon (float): Longitude of the radar location in degrees.
+        lat (float): Latitude of the radar location in degrees. WGS84 reference system, negative values on southern hemisphere.
+        lon (float): Longitude of the radar location in degrees. WGS84 reference system, negative values on western hemisphere.
         altitude (float): Altitude of the radar location in meters.
         refraction_correction (bool): Whether to apply atmospheric refraction correction. Defaults to True.
         humidity (float): Humidity level for refraction correction. Defaults to 0.5.
@@ -36,35 +36,12 @@ class SunObject:
         eph = load('de421.bsp')
         earth = eph['earth']
         self.sun = eph['sun']
-        self.location = self.get_radar_location(lat, lon, altitude, earth)
+        self.location = earth + wgs84.latlon(lat, lon, elevation_m=altitude)
         self.ts = load.timescale()
         self.refraction = refraction_correction
         self.humidity = humidity
         logger.info(f'Initialized SunObject with location lat: {lat}, lon: {lon}, altitude: {altitude}, refraction_correction: {refraction_correction}, humidity: {humidity}')
 
-    def get_radar_location(self, lat, lon, altitude, earth):
-        """Get the radar location as a Skyfield object.
-
-        Args:
-            lat (float): Latitude of the radar location in degrees.
-            lon (float): Longitude of the radar location in degrees.
-            altitude (float): Altitude of the radar location in meters.
-            earth (Skyfield object): The Earth object from Skyfield.
-
-        Returns:
-            Skyfield object: The location of the radar as a Skyfield object.
-
-        """
-        if lat > 0:
-            lat = lat * N
-        else:
-            lat = lat * S
-        if lon > 0:
-            lon = lon * E
-        else:
-            lon = lon * W
-        return earth + wgs84.latlon(lat, lon, elevation_m=altitude)
-    
     def convert_times(self, t):
         """Convert various time formats to Skyfield times."""
         if isinstance(t, str) and t == 'now':
@@ -89,7 +66,7 @@ class SunObject:
         """Compute the position of the sun at a given time.
 
         Args:
-            t (datetime or list of datetime or str or numpy.ndarray): The time(s) to compute the sun position for.
+            t (datetime or list of datetime or str or numpy.ndarray): The UTC time(s) to compute the sun position for.
                 If 'now', computes for the current time.
                 If datetime, computes for that specific time.
                 If list of datetime, computes for each time in the list.
