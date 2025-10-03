@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sunscanpy"
-version = "0.1.1"
+version = "0.1.2"
 description = "A python module for radar pointing calibration using the sun"
 readme = "README.md"
 authors = [
