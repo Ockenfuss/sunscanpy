@@ -30,6 +30,13 @@ cd sunscanpy
 pip install -e .
 ```
 
+## Scanner Visualization
+`sunscan/scanner_animation_streamlit.py` contains a streamlit application to visualize the orientation of the scanner, given a set of axis positions and scanner parameters. To run it:
+```
+pip install sunscanpy[dev] # needs streamlit, which is not installed by default with sunscanpy
+streamlit run sunscan/scanner_animation_streamlit.py
+```
+
 ## Contributing
 See Contributing.md
 
