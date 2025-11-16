@@ -244,13 +244,13 @@ def get_beamcentered_coords(azi_beam, elv_beam, azi_sun, elv_sun):
     return bx, by
 
 class SignalSimulator(object):
-    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut: LookupTable, sky_signal, sun_signal, sun=None):
+    def __init__(self, dgamma, domega, dtime, fwhm_x, fwhm_y, backlash_gamma, limb_darkening, lut: LookupTable, rec_noise, sun_signal, sun=None):
         self.lut = lut
         self.fwhm_x = fwhm_x
         self.fwhm_y = fwhm_y
         self.limb_darkening = limb_darkening
         self.sun = sun
-        self.sky_signal = sky_signal
+        self.rec_noise = rec_noise
         self.sun_signal = sun_signal
         self.local_scanner = BacklashScanner(dgamma, domega, dtime, backlash_gamma, flex=0)
     
@@ -265,7 +265,7 @@ class SignalSimulator(object):
             "fwhm_y": self.fwhm_y,
             "backlash_gamma": scanner_params['backlash_gamma'],
             "limb_darkening": self.limb_darkening,
-            "sky_signal": self.sky_signal,
+            "rec_noise": self.rec_noise,
             "sun_signal": self.sun_signal,
         }
     
@@ -278,7 +278,7 @@ class SignalSimulator(object):
             f"Beamwidth co-elevation: {self.fwhm_y:.4f} º\n" + \
             f"Azimuth Backlash: {self.local_scanner.backlash_gamma:.4f} º\n" + \
             f"Limb Darkening factor: {self.limb_darkening:.4f}\n" + \
-            f"Sky Noise: {self.sky_signal:.4f} [lin. units]\n" + \
+            f"Sky(Noise): {self.rec_noise:.4f} [lin. units]\n" + \
             f"Sun Brightness: {self.sun_signal:.4f} [lin. units]\n"
     
     def get_sunpos_beamcentered(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
@@ -293,7 +293,7 @@ class SignalSimulator(object):
     
     def signal_from_bc_coords(self, lx, ly):
         sun_contribution = self.lut.lookup(lx=lx, ly=ly, fwhm_x=self.fwhm_x, fwhm_y=self.fwhm_y, limb_darkening=self.limb_darkening)
-        sun_sim_linear= self.sky_signal*(1-sun_contribution) + self.sun_signal*sun_contribution
+        sun_sim_linear= self.rec_noise + self.sun_signal*sun_contribution
         return sun_sim_linear
     
     def forward_sun(self, gamma, omega, sun_azi, sun_elv, gammav, omegav):
@@ -329,26 +329,25 @@ class SignalSimulator(object):
         gamma_s, omega_s=self.local_scanner.inverse(beam_azi, beam_elv, gammav=0.0, omegav=0.0, reverse=reverse)
         return gamma_s, omega_s, beam_azi, beam_elv
 
-def sun_lin_from_center_signal(lut: LookupTable, center_lin, sky_signal, fwhm_x, fwhm_y, limb_darkening):
+def sun_lin_from_center_signal(lut: LookupTable, center_lin, rec_noise, fwhm_x, fwhm_y, limb_darkening):
     sun_contribution = lut.lookup(0,0, fwhm_x, fwhm_y, limb_darkening).item()
-    sky_contribution = 1- sun_contribution
-    sun_linear = (center_lin - sky_signal* sky_contribution) / sun_contribution
+    sun_linear = (center_lin - rec_noise) / sun_contribution
     return sun_linear
         
 
 
-def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, sky_signal, sun_signal):
-    simulator= SignalSimulator(**params_dict, lut=lut, sky_signal=sky_signal, sun_signal=sun_signal)
+def forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, rec_noise, sun_signal):
+    simulator= SignalSimulator(**params_dict, lut=lut, rec_noise=rec_noise, sun_signal=sun_signal)
     # for performance reasons, we we use the forward_sun method and calculate the sun position once externally
     sun_sim_lin = simulator.forward_sun(gamma, omega, sun_azi, sun_elv, gammav, omegav)
     return sun_sim_lin
         
-def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_lin, gammav, omegav, lut:LookupTable, sky_signal, sun_signal):
+def optimize_function(params_list, gamma, omega, sun_azi, sun_elv, signal_lin, gammav, omegav, lut:LookupTable, rec_noise, sun_signal):
     params_dict= {k: params_list[v] for k, v in SUNSIM_PARAMETER_MAP.items()}
     if sun_signal is None: 
         # assume that the maximum signal is from pointing to the center of the sun-> Determine sun brightness from the max signal and the beam width
-        sun_signal=sun_lin_from_center_signal(lut, signal_lin.max(), sky_signal, params_dict['fwhm_x'], params_dict['fwhm_y'], params_dict['limb_darkening'])
-    sun_sim_lin = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, sky_signal, sun_signal)
+        sun_signal=sun_lin_from_center_signal(lut, signal_lin.max(), rec_noise, params_dict['fwhm_x'], params_dict['fwhm_y'], params_dict['limb_darkening'])
+    sun_sim_lin = forward_model(params_dict, gamma, omega, sun_azi, sun_elv, gammav, omegav, lut, rec_noise, sun_signal)
     #db error
     error = linear_to_db(sun_sim_lin) - linear_to_db(signal_lin)
     # linear error
@@ -361,7 +360,8 @@ class SignalSimulationEstimator(object):
     def __init__(self, sun, params_optimize=None, params_guess=None, params_bounds=None, lutpath=None, sky_signal=None, sun_signal=None):
         self.lutpath=lutpath
         self.sun = sun
-        self.sky_signal = sky_signal
+        # sky_signal and sun_signal are in linear units
+        self.rec_noise = sky_signal # assume that the sky emission is almost zero and the signal we receive is actually receiver noise
         self.sun_signal = sun_signal
 
         if params_optimize is None:
@@ -388,9 +388,9 @@ class SignalSimulationEstimator(object):
     
     def fit(self, gamma, omega, time, signal_db, gammav, omegav, brute_force=True, brute_force_points=3):
         signal_lin= db_to_linear(signal_db)
-        sky_signal=self.sky_signal
-        if sky_signal is None:
-            sky_signal = signal_lin.min() 
+        rec_noise=self.rec_noise
+        if rec_noise is None:
+            rec_noise = signal_lin.min() 
             #if sun_lin is also None, it will be determined during the optimization based on the beam width and the maximum signal
 
         time_max = signal_lin.argmax()
@@ -412,7 +412,7 @@ class SignalSimulationEstimator(object):
 
         sun_azi, sun_elv = self.sun.compute_sun_location(t=time)
         # check that with the initial guess, the relative difference between sun and scanner is within the lookup table
-        init_simulator= SignalSimulator(**params_guess, lut=lut, sun=self.sun, sky_signal=sky_signal, sun_signal=self.sun_signal)
+        init_simulator= SignalSimulator(**params_guess, lut=lut, sun=self.sun, rec_noise=rec_noise, sun_signal=self.sun_signal)
         valid=init_simulator.check_within_lut(gamma, omega, sun_azi, sun_elv, gammav, omegav)
         if not valid.all():
             logger.warning(f'Warning: {(~valid).sum().item()} datapoints are too far away from the sun. They will be ignored.')
@@ -424,7 +424,7 @@ class SignalSimulationEstimator(object):
             omegav=omegav[valid]
             sun_azi=sun_azi[valid]
             sun_elv=sun_elv[valid]
-        optimize_args = (gamma, omega, sun_azi, sun_elv, signal_lin, gammav, omegav, lut, sky_signal, self.sun_signal)
+        optimize_args = (gamma, omega, sun_azi, sun_elv, signal_lin, gammav, omegav, lut, rec_noise, self.sun_signal)
         params_guess_list, params_bounds_list= get_parameter_lists(self.params_optimize, params_guess, params_bounds, SUNSIM_PARAMETER_MAP)
         init_rmse = optimize_function(params_guess_list, *optimize_args)
         if brute_force:
@@ -452,10 +452,10 @@ class SignalSimulationEstimator(object):
         logger.info(f"Optimal objective: {opt_res.fun:.6f}")
 
         if self.sun_signal is None: 
-            sun_lin=sun_lin_from_center_signal(lut, signal_lin.max(), sky_signal, fit_result_dict['fwhm_x'], fit_result_dict['fwhm_y'], fit_result_dict['limb_darkening'])
+            sun_lin=sun_lin_from_center_signal(lut, signal_lin.max(), rec_noise, fit_result_dict['fwhm_x'], fit_result_dict['fwhm_y'], fit_result_dict['limb_darkening'])
         else:
             sun_lin=self.sun_signal
-        fitted_simulator= SignalSimulator(**fit_result_dict, lut=lut, sun=self.sun, sky_signal=sky_signal, sun_signal=sun_lin)
+        fitted_simulator= SignalSimulator(**fit_result_dict, lut=lut, sun=self.sun, rec_noise=rec_noise, sun_signal=sun_lin)
         return fitted_simulator, opt_res.fun
 
 
