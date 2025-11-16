@@ -7,7 +7,7 @@ from .params import sc_params
 from .signal_simulation import SignalSimulator, SignalSimulationEstimator
 from .scanner_estimation import ScannerEstimator
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __author__ = "Paul Ockenfuss, Gregor Köcher"
 __email__ = "paul.ockenfuss@physik.uni-muenchen.de"
 
