@@ -3,6 +3,9 @@
   <img src="assets/icons/SunscanPyLogo.svg" alt="SunscanPy Logo" width="200" height="auto">
   <!-- <h1>SunscanPy</h1> -->
   <p><em>A python library to calibrate the pointing of your weather or cloud radar based on the position of the Sun!</em></p>
+  <p>
+    <a href="https://doi.org/10.5281/zenodo.18862011"><img src="https://zenodo.org/badge/1031845964.svg" alt="DOI"></a>
+  </p>
 </div>
 
 ## Description
